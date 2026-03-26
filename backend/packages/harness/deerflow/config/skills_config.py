@@ -2,6 +2,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+# done
+
 
 class SkillsConfig(BaseModel):
     """Configuration for skills system"""

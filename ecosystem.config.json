@@ -1,0 +1,39 @@
+{
+  "apps": [
+    {
+      "name": "deerflow-nginx",
+      "script": "nginx",
+      "args": "-c ./docker/nginx/nginx.local.conf -p .",
+      "cwd": ".",
+      "autorestart": true,
+      "watch": false
+    },
+    {
+      "name": "deerflow-langgraph",
+      "script": "uv",
+      "args": "run langgraph dev --no-browser --allow-blocking --no-reload",
+      "cwd": "./backend",
+      "autorestart": true,
+      "watch": false
+    },
+    {
+      "name": "deerflow-gateway",
+      "script": "uv",
+      "args": "run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --reload",
+      "cwd": "./backend",
+      "env": {
+        "PYTHONPATH": "."
+      },
+      "autorestart": true,
+      "watch": false
+    },
+    {
+      "name": "deerflow-frontend",
+      "script": "pnpm",
+      "args": "dev",
+      "cwd": "./frontend",
+      "autorestart": true,
+      "watch": false
+    }
+  ]
+}

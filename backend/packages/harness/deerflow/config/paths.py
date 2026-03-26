@@ -4,6 +4,7 @@ from pathlib import Path
 
 # Virtual path prefix seen by agents inside the sandbox
 VIRTUAL_PATH_PREFIX = "/mnt/user-data"
+# done
 
 _SAFE_THREAD_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
@@ -65,7 +66,6 @@ class Paths:
         cwd = Path.cwd()
         if cwd.name == "backend" or (cwd / "pyproject.toml").exists():
             return cwd / ".deer-flow"
-
         return Path.home() / ".deer-flow"
 
     @property
@@ -180,14 +180,16 @@ class Paths:
             raise ValueError(f"Path must start with /{prefix}")
 
         relative = stripped[len(prefix) :].lstrip("/")
+
+        print(stripped, prefix, relative)
         base = self.sandbox_user_data_dir(thread_id).resolve()
         actual = (base / relative).resolve()
-
         try:
             actual.relative_to(base)
+            print(actual)
+
         except ValueError:
             raise ValueError("Access denied: path traversal detected")
-
         return actual
 
 
@@ -213,4 +215,5 @@ def resolve_path(path: str) -> Path:
     p = Path(path)
     if not p.is_absolute():
         p = get_paths().base_dir / path
+
     return p.resolve()

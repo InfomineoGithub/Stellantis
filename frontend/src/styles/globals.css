@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+
 @source "../node_modules/streamdown/dist/index.js";
 
 /* Heading */
@@ -389,4 +390,69 @@
   --container-width-sm: calc(var(--spacing) * 144);
   --container-width-md: calc(var(--spacing) * 204);
   --container-width-lg: calc(var(--spacing) * 256);
+}
+
+@theme inline {
+  --color-secondary-fixed-dim: #bcc7de;
+  --color-surface-variant: #2d3449;
+  --color-secondary: #bcc7de;
+  --color-tertiary-fixed: #ffdcc6;
+  --color-on-surface-variant: #c2c6d6;
+  --color-primary-fixed: #d8e2ff;
+  --color-outline-variant: #424754;
+  --color-on-primary-fixed-variant: #004395;
+  --color-on-secondary-fixed: #111c2d;
+  --color-secondary-container: #3e495d;
+  --color-on-error: #690005;
+  --color-on-tertiary: #502400;
+  --color-on-secondary-container: #aeb9d0;
+  --color-secondary-fixed: #d8e3fb;
+  --color-primary-container: #4d8eff;
+  --color-surface-container: #171f33;
+  --color-tertiary-fixed-dim: #ffb786;
+  --color-on-tertiary-fixed-variant: #723600;
+  --color-tertiary: #ffb786;
+  --color-surface-container-highest: #2d3449;
+  --color-surface: #0b1326;
+  --color-on-background: #dae2fd;
+  --color-surface-tint: #adc6ff;
+  --color-surface-container-lowest: #060e20;
+  --color-inverse-surface: #dae2fd;
+  --color-on-primary-container: #00285d;
+  --color-on-tertiary-container: #461f00;
+  --color-primary-fixed-dim: #adc6ff;
+  --color-on-error-container: #ffdad6;
+  --color-primary: #adc6ff;
+  --color-on-tertiary-fixed: #311400;
+  --color-surface-bright: #31394d;
+  --color-error-container: #93000a;
+  --color-error: #ffb4ab;
+  --color-background: #0b1326;
+  --color-outline: #8c909f;
+  --color-surface-container-low: #131b2e;
+  --color-tertiary-container: #df7412;
+  --color-inverse-primary: #005ac2;
+  --color-on-secondary-fixed-variant: #3c475a;
+  --color-on-secondary: #263143;
+  --color-on-surface: #dae2fd;
+  --color-on-primary-fixed: #001a42;
+  --color-on-primary: #002e6a;
+  --color-surface-container-high: #222a3d;
+  --color-inverse-on-surface: #283044;
+  --color-surface-dim: #0b1326;
+  
+  --font-headline: "Space Grotesk", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "Inter", sans-serif;
+}
+
+@layer base {
+  .minimal-border { border: 1px solid rgba(255, 255, 255, 0.05); }
+  .feature-box {
+      background: linear-gradient(to bottom right, rgba(23, 31, 51, 0.4), rgba(11, 19, 38, 0.2));
+      border: 1px solid rgba(173, 198, 255, 0.05);
+  }
+  .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
 }

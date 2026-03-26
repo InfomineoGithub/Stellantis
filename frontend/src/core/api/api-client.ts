@@ -6,10 +6,26 @@ import { getLangGraphBaseURL } from "../config";
 
 import { sanitizeRunStreamOptions } from "./stream-mode";
 
+import { getAuthHeaders, clearJwtTokenCache } from "./auth-fetch";
+
 function createCompatibleClient(isMock?: boolean): LangGraphClient {
   const client = new LangGraphClient({
     apiUrl: getLangGraphBaseURL(isMock),
+    // onRequest is called before every SDK request — the correct extension
+    // point for injecting dynamic (async) headers like a JWT Bearer token.
+    onRequest: async (_url, init) => {
+      const authHeaders = await getAuthHeaders();
+      return {
+        ...init,
+        credentials: "include" as RequestCredentials,
+        headers: {
+          ...authHeaders,
+          ...(init.headers as Record<string, string> | undefined),
+        },
+      };
+    },
   });
+
 
   const originalRunStream = client.runs.stream.bind(client.runs);
   client.runs.stream = ((threadId, assistantId, payload) =>
@@ -28,6 +44,13 @@ function createCompatibleClient(isMock?: boolean): LangGraphClient {
     )) as typeof client.runs.joinStream;
 
   return client;
+}
+
+// Reset singleton when needed (e.g. after sign-out).
+export function resetAPIClient(): void {
+  _singleton = null;
+  // Also clear the cached JWT so the next request fetches a fresh token.
+  clearJwtTokenCache();
 }
 
 let _singleton: LangGraphClient | null = null;

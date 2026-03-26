@@ -16,13 +16,15 @@ dependencies = [
     "python-telegram-bot>=21.0",
     "langgraph-sdk>=0.1.51",
     "markdown-to-mrkdwn>=0.3.1",
+    "stellantis-auth",
 ]
 
 [dependency-groups]
 dev = ["pytest>=8.0.0", "ruff>=0.14.11"]
 
 [tool.uv.workspace]
-members = ["packages/harness"]
+members = ["packages/harness", "packages/auth"]
 
 [tool.uv.sources]
 deerflow-harness = { workspace = true }
+stellantis-auth = { workspace = true }

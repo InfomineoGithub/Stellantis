@@ -4,9 +4,13 @@ Sets up sys.path and pre-mocks modules that would cause circular import
 issues when unit-testing lightweight config/registry code in isolation.
 """
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
+
+# Force auth bypass for all tests so they don't need a valid JWT token
+os.environ["BYPASS_AUTH"] = "true"
 
 # Make 'app' and 'deerflow' importable from any working directory
 sys.path.insert(0, str(Path(__file__).parent.parent))

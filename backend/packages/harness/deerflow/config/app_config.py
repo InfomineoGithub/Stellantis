@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Self
 
+# done
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
@@ -152,8 +153,7 @@ class AppConfig(BaseModel):
 
         if user_version < example_version:
             logger.warning(
-                "Your config.yaml (version %d) is outdated — the latest version is %d. "
-                "Run `make config-upgrade` to merge new fields into your config.",
+                "Your config.yaml (version %d) is outdated — the latest version is %d. Run `make config-upgrade` to merge new fields into your config.",
                 user_version,
                 example_version,
             )

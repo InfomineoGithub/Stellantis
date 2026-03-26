@@ -4,6 +4,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.runnables import RunnableConfig
 
+# done
 from deerflow.agents.lead_agent.prompt import apply_prompt_template
 from deerflow.agents.middlewares.clarification_middleware import ClarificationMiddleware
 from deerflow.agents.middlewares.loop_detection_middleware import LoopDetectionMiddleware
@@ -273,10 +274,10 @@ def make_lead_agent(config: RunnableConfig):
     agent_config = load_agent_config(agent_name) if not is_bootstrap else None
     # Custom agent model or fallback to global/default model resolution
     agent_model_name = agent_config.model if agent_config and agent_config.model else _resolve_model_name()
-
     # Final model name resolution with request override, then agent config, then global default
     model_name = requested_model_name or agent_model_name
 
+    print(model_name)
     app_config = get_app_config()
     model_config = app_config.get_model_config(model_name) if model_name else None
 

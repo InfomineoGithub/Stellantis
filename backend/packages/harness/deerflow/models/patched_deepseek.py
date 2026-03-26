@@ -6,6 +6,7 @@ stores reasoning_content in additional_kwargs but doesn't include it when making
 subsequent API calls, which causes errors with APIs that require reasoning_content
 on all assistant messages when thinking mode is enabled.
 """
+# done
 
 from typing import Any
 
