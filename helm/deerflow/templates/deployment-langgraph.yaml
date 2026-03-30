@@ -23,7 +23,7 @@ spec:
         - name: langgraph
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
-          command: ["sh", "-c", "cd /app/backend && uv run langgraph dev --no-browser --allow-blocking --no-reload --host 0.0.0.0 --port 2024"]
+          command: ["sh", "-c", "cd /app/backend && uv run langgraph up --no-browser --host 0.0.0.0 --port 2024"]
           workingDir: /app
           ports:
             - name: http
@@ -32,6 +32,8 @@ spec:
           env:
             - name: CI
               value: "true"
+            - name: DATABASE_URI
+              value: {{ .Values.checkpointer.connectionString | quote }}
             - name: DEER_FLOW_HOME
               value: /app/backend/.deer-flow
             - name: DEER_FLOW_CONFIG_PATH
@@ -75,8 +77,6 @@ spec:
             - name: deer-flow-home
               mountPath: /app/skills
               subPath: skills
-            - name: langgraph-api
-              mountPath: /app/backend/.langgraph_api
       volumes:
         - name: config
           configMap:
@@ -88,5 +88,3 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        - name: langgraph-api
-          emptyDir: {}
