@@ -30,10 +30,10 @@ def main():
         print(f"Failed to connect to PostgreSQL: {e}")
         sys.exit(1)
 
-    # Get all distinct threads with their latest checkpoint metadata
+    # Get all distinct threads with their latest checkpoint data (including title)
     rows = conn.execute("""
         SELECT DISTINCT ON (thread_id)
-            thread_id, metadata
+            thread_id, metadata, checkpoint
         FROM checkpoints
         WHERE checkpoint_ns = ''
         ORDER BY thread_id, checkpoint_id DESC
@@ -48,6 +48,12 @@ def main():
     for row in rows:
         thread_id = row[0]
         metadata = row[1] if isinstance(row[1], dict) else {}
+        checkpoint = row[2] if isinstance(row[2], dict) else {}
+
+        # Extract title from checkpoint channel_values
+        channel_values = checkpoint.get("channel_values", {})
+        title = channel_values.get("title")
+        values = {"title": title} if title else None
 
         threads.append({
             "thread_id": uuid.UUID(thread_id),
@@ -57,8 +63,10 @@ def main():
             "metadata": {},
             "status": "idle",
             "config": {},
-            "values": None,
+            "values": values,
         })
+        if title:
+            print(f"  {thread_id}: {title}")
 
     # Build the full pickle structure
     store = {
