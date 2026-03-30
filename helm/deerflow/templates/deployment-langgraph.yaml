@@ -19,6 +19,19 @@ spec:
       annotations:
         checksum/config: {{ include (print .Template.BasePath "/configmap-deerflow.yaml") . | sha256sum }}
     spec:
+      initContainers:
+        - name: restore-threads
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command: ["sh", "-c", "cd /app/backend && uv run python scripts/restore-threads.py"]
+          env:
+            - name: DATABASE_URI
+              value: {{ .Values.checkpointer.connectionString | quote }}
+            - name: PICKLE_PATH
+              value: /data/.langgraph_api/.langgraph_ops.pckl
+          volumeMounts:
+            - name: langgraph-api
+              mountPath: /data/.langgraph_api
       containers:
         - name: langgraph
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -77,6 +90,8 @@ spec:
             - name: deer-flow-home
               mountPath: /app/skills
               subPath: skills
+            - name: langgraph-api
+              mountPath: /app/backend/.langgraph_api
       volumes:
         - name: config
           configMap:
@@ -88,3 +103,5 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: langgraph-api
+          emptyDir: {}
