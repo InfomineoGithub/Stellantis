@@ -282,6 +282,9 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
                             name="skills",
                             mount_path="/mnt/skills",
                             read_only=True,
+                            sub_path="skills"
+                            if SANDBOX_PVC_NAME
+                            else None,
                         ),
                         k8s_client.V1VolumeMount(
                             name="user-data",
@@ -307,7 +310,9 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
                     )
                     if not SANDBOX_PVC_NAME
                     else None,
-                    empty_dir=k8s_client.V1EmptyDirVolumeSource()
+                    persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
+                        claim_name=SANDBOX_PVC_NAME,
+                    )
                     if SANDBOX_PVC_NAME
                     else None,
                 ),

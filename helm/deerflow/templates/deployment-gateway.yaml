@@ -66,7 +66,7 @@ spec:
               mountPath: /app/backend/.deer-flow
             - name: skills
               mountPath: /app/skills
-              readOnly: true
+              subPath: skills
       volumes:
         - name: config
           configMap:
@@ -79,4 +79,9 @@ spec:
           emptyDir: {}
           {{- end }}
         - name: skills
+          {{- if .Values.persistence.deerFlowHome.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "deerflow.fullname" . }}-home
+          {{- else }}
           emptyDir: {}
+          {{- end }}

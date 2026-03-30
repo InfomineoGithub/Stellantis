@@ -74,7 +74,7 @@ spec:
               mountPath: /app/backend/.deer-flow
             - name: skills
               mountPath: /app/skills
-              readOnly: true
+              subPath: skills
             - name: langgraph-api
               mountPath: /app/backend/.langgraph_api
       volumes:
@@ -89,6 +89,11 @@ spec:
           emptyDir: {}
           {{- end }}
         - name: skills
+          {{- if .Values.persistence.deerFlowHome.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "deerflow.fullname" . }}-home
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: langgraph-api
           emptyDir: {}
