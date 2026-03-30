@@ -279,7 +279,7 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
                     ),
                     volume_mounts=[
                         k8s_client.V1VolumeMount(
-                            name="skills",
+                            name="shared-data" if SANDBOX_PVC_NAME else "skills",
                             mount_path="/mnt/skills",
                             read_only=True,
                             sub_path="skills"
@@ -287,7 +287,7 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
                             else None,
                         ),
                         k8s_client.V1VolumeMount(
-                            name="user-data",
+                            name="shared-data" if SANDBOX_PVC_NAME else "user-data",
                             mount_path="/mnt/user-data",
                             read_only=False,
                             sub_path=f"threads/{thread_id}/user-data"
@@ -303,32 +303,27 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
             ],
             volumes=[
                 k8s_client.V1Volume(
+                    name="shared-data",
+                    persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
+                        claim_name=SANDBOX_PVC_NAME,
+                    ),
+                ),
+            ]
+            if SANDBOX_PVC_NAME
+            else [
+                k8s_client.V1Volume(
                     name="skills",
                     host_path=k8s_client.V1HostPathVolumeSource(
                         path=SKILLS_HOST_PATH,
                         type="Directory",
-                    )
-                    if not SANDBOX_PVC_NAME
-                    else None,
-                    persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
-                        claim_name=SANDBOX_PVC_NAME,
-                    )
-                    if SANDBOX_PVC_NAME
-                    else None,
+                    ),
                 ),
                 k8s_client.V1Volume(
                     name="user-data",
                     host_path=k8s_client.V1HostPathVolumeSource(
                         path=f"{THREADS_HOST_PATH}/{thread_id}/user-data",
                         type="DirectoryOrCreate",
-                    )
-                    if not SANDBOX_PVC_NAME
-                    else None,
-                    persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
-                        claim_name=SANDBOX_PVC_NAME,
-                    )
-                    if SANDBOX_PVC_NAME
-                    else None,
+                    ),
                 ),
             ],
             restart_policy="Always",
