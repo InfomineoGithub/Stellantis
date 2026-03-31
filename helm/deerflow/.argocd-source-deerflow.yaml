@@ -4,7 +4,7 @@ helm:
     value: europe-west1-docker.pkg.dev/stellantis-490509/deer-flow-backend/api
     forcestring: true
   - name: images.backend.tag
-    value: latest@sha256:b86ba80ba408b6bf735875ab53789c317f61415f67a380aa7bea919946b612d8
+    value: latest@sha256:237fac81c72b9c0cbf0783d963b037c7b62b1d594328ccfe69b705b2d798b01f
     forcestring: true
   - name: images.frontend.repository
     value: europe-west1-docker.pkg.dev/stellantis-490509/deer-flow-frontend/deer-flow-frontend
