@@ -75,6 +75,9 @@ spec:
             - name: deer-flow-home
               mountPath: /app/skills
               subPath: skills
+            - name: deer-flow-home
+              mountPath: /app/backend/.langgraph_api
+              subPath: langgraph_api
       volumes:
         - name: config
           configMap:
