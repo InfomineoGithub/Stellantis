@@ -1,5 +1,5 @@
-import { getBackendBaseURL } from "@/core/config";
 import { fetchWithAuth } from "@/core/api/auth-fetch";
+import { getBackendBaseURL } from "@/core/config";
 
 import type { Agent, CreateAgentRequest, UpdateAgentRequest } from "./types";
 

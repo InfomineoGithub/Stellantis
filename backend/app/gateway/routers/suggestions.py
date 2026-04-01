@@ -2,10 +2,9 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends
-
-from app.gateway.dependencies import get_current_user
 from pydantic import BaseModel, Field
 
+from app.gateway.dependencies import get_current_user
 from deerflow.models import create_chat_model
 
 logger = logging.getLogger(__name__)

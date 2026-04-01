@@ -1,14 +1,14 @@
 "use client";
 
-import * as React from "react";
 import { useRouter } from "next/navigation";
+import * as React from "react";
+
 import { authClient } from "@/server/better-auth/client";
+
 import { Button, GoogleIcon } from "./ui";
 
 export function LoginPage() {
   const router = useRouter();
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
 
   const handleGoogleSignIn = async () => {
     await authClient.signIn.social({
@@ -93,15 +93,6 @@ export function LoginPage() {
               Bypass Protocol
             </Button>
           </div>
-
-          {/* Error message */}
-          {error && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-xs font-mono">
-              {error}
-            </div>
-          )}
-
-
 
           <div className="mt-8 text-center">
             <a

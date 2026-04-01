@@ -1,4 +1,5 @@
 import jwt
+
 print(jwt.__version__)
 
 try:

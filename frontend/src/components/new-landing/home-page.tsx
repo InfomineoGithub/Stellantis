@@ -1,14 +1,15 @@
 "use client";
 
-import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import * as React from "react";
+
 import { authClient } from "@/server/better-auth/client";
+
 import { Button, GoogleIcon } from "./ui";
 
 export function HomePage() {
   const router = useRouter();
-  const [loading, setLoading] = React.useState(false);
 
   const handleGoogleSignIn = async () => {
     await authClient.signIn.social({

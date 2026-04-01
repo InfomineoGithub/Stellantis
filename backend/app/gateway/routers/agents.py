@@ -6,10 +6,9 @@ import shutil
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
-
-from app.gateway.dependencies import get_current_user
 from pydantic import BaseModel, Field
 
+from app.gateway.dependencies import get_current_user
 from deerflow.config.agents_config import AgentConfig, list_custom_agents, load_agent_config, load_agent_soul
 from deerflow.config.paths import get_paths
 

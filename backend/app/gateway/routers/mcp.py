@@ -4,10 +4,9 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-
-from app.gateway.dependencies import get_current_user
 from pydantic import BaseModel, Field
 
+from app.gateway.dependencies import get_current_user
 from deerflow.config.extensions_config import ExtensionsConfig, get_extensions_config, reload_extensions_config
 
 logger = logging.getLogger(__name__)

@@ -1,5 +1,6 @@
-import { getBackendBaseURL } from "../config";
 import { fetchWithAuth } from "@/core/api/auth-fetch";
+
+import { getBackendBaseURL } from "../config";
 
 import type { UserMemory } from "./types";
 

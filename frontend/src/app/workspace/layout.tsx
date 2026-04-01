@@ -1,9 +1,9 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { Toaster } from "sonner";
-import { useRouter } from "next/navigation";
 
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WorkspaceSidebar } from "@/components/workspace/workspace-sidebar";
@@ -19,7 +19,7 @@ export default function WorkspaceLayout({
   const [open, setOpen] = useState(false); // SSR default: open (matches server render)
 
   useEffect(() => {
-    fetch("/api/me").then((res) => {
+    void fetch("/api/me").then((res) => {
       if (res.status === 401) {
         router.replace("/");
       }
