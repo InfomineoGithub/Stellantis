@@ -8,7 +8,7 @@ export const auth = betterAuth({
     connectionString: env.DATABASE_URL || "",
   }),
   emailAndPassword: {
-    enabled: true,
+    enabled: false,
   },
   socialProviders: {
     google: {

@@ -3,16 +3,12 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/server/better-auth/client";
-import { clearJwtTokenCache } from "@/core/api/auth-fetch";
 import { Button, GoogleIcon } from "./ui";
 
 export function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = React.useState("");
-  const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [mode, setMode] = React.useState<"signin" | "signup">("signin");
 
   const handleGoogleSignIn = async () => {
     await authClient.signIn.social({
@@ -21,55 +17,7 @@ export function LoginPage() {
     });
   };
 
-  const handleEmailSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      // Clear any stale cached JWT before signing in
-      clearJwtTokenCache();
-      const result = await authClient.signIn.email({
-        email,
-        password,
-        callbackURL: "/workspace",
-      });
-      if (result.error) {
-        setError(result.error.message ?? "Sign in failed");
-      } else {
-        router.push("/workspace");
-      }
-    } catch (err: any) {
-      setError(err?.message ?? "Sign in failed");
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleEmailSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      clearJwtTokenCache();
-      const result = await authClient.signUp.email({
-        email,
-        password,
-        name: email.split("@").at(0) ?? email,
-        callbackURL: "/workspace",
-      });
-      if (result.error) {
-        setError(result.error.message ?? "Sign up failed");
-      } else {
-        router.push("/workspace");
-      }
-    } catch (err: any) {
-      setError(err?.message ?? "Sign up failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const isSignUp = mode === "signup";
 
   return (
     <div className="bg-background text-on-background min-h-screen flex flex-col">
@@ -110,7 +58,7 @@ export function LoginPage() {
               </div>
             </div>
             <h1 className="font-headline text-3xl font-bold tracking-tight text-on-surface mb-2">
-              {isSignUp ? "Create Account" : "Terminal Access"}
+              Terminal Access
             </h1>
             <p className="text-primary-fixed-dim text-sm font-medium tracking-wide uppercase opacity-70">
               Automotive Intelligence Portal
@@ -118,9 +66,9 @@ export function LoginPage() {
           </div>
 
           {/* Google Sign-in (only for sign-in mode) */}
-          {!isSignUp && (
+          <div className="space-y-4">
             <Button
-              className="w-full flex items-center justify-center gap-3 bg-surface-container-highest py-3 px-4 hover:bg-surface-bright group relative mb-8 rounded"
+              className="w-full flex items-center justify-center gap-3 bg-surface-container-highest py-3 px-4 hover:bg-surface-bright group relative rounded"
               onClick={handleGoogleSignIn}
             >
               <div className="absolute inset-0 border border-primary/10 pointer-events-none group-hover:border-primary/30 transition-colors rounded"></div>
@@ -129,17 +77,22 @@ export function LoginPage() {
                 Sign in with Google
               </span>
             </Button>
-          )}
 
-          {!isSignUp && (
-            <div className="flex items-center gap-4 mb-8">
+            <div className="flex items-center gap-4 py-2">
               <div className="h-[1px] flex-grow bg-outline-variant/20"></div>
               <span className="text-[10px] uppercase tracking-widest text-outline">
-                Standard Protocol
+                Secondary Access
               </span>
               <div className="h-[1px] flex-grow bg-outline-variant/20"></div>
             </div>
-          )}
+
+            <Button
+              className="w-full bg-surface-container-highest text-on-surface/70 hover:text-primary font-headline font-semibold uppercase tracking-[0.2em] py-3 hover:bg-surface-bright active:scale-[0.95] rounded border border-primary/5 hover:border-primary/20 transition-all duration-300 text-[10px]"
+              onClick={() => router.push("/workspace")}
+            >
+              Bypass Protocol
+            </Button>
+          </div>
 
           {/* Error message */}
           {error && (
@@ -148,86 +101,7 @@ export function LoginPage() {
             </div>
           )}
 
-          <form
-            className="space-y-6"
-            onSubmit={isSignUp ? handleEmailSignUp : handleEmailSignIn}
-          >
-            <div className="space-y-1">
-              <label
-                className="block text-[10px] font-bold uppercase tracking-[0.15em] text-primary-fixed-dim"
-                htmlFor="terminal-id"
-              >
-                Terminal ID (Email)
-              </label>
-              <input
-                className="w-full bg-surface-container-lowest border-none border-b border-transparent focus:border-b focus:border-primary focus:ring-0 text-on-surface placeholder:text-on-surface-variant/30 py-3 transition-all duration-300 font-mono text-sm px-4 rounded-t"
-                id="terminal-id"
-                placeholder="user@kinetic-systems.com"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <label
-                className="block text-[10px] font-bold uppercase tracking-[0.15em] text-primary-fixed-dim"
-                htmlFor="passcode"
-              >
-                Passcode
-              </label>
-              <input
-                className="w-full bg-surface-container-lowest border-none border-b border-transparent focus:border-b focus:border-primary focus:ring-0 text-on-surface placeholder:text-on-surface-variant/30 py-3 transition-all duration-300 font-mono text-sm px-4 rounded-t"
-                id="passcode"
-                placeholder="••••••••"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={8}
-              />
-            </div>
-            <div className="pt-4">
-              <Button
-                className="w-full bg-gradient-to-r from-primary to-primary-container text-on-primary font-headline font-bold uppercase tracking-widest py-4 hover:opacity-90 active:scale-[0.98] rounded shadow-lg"
-                type="submit"
-                disabled={loading}
-              >
-                {loading
-                  ? isSignUp
-                    ? "Creating..."
-                    : "Authenticating..."
-                  : isSignUp
-                    ? "Create Account"
-                    : "Authenticate"}
-              </Button>
 
-              {/* Mode toggle */}
-              <div className="pt-4 text-center">
-                <button
-                  type="button"
-                  className="text-[10px] uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors"
-                  onClick={() => {
-                    setMode(isSignUp ? "signin" : "signup");
-                    setError(null);
-                  }}
-                >
-                  {isSignUp
-                    ? "Already have access? Sign In"
-                    : "New user? Create Account"}
-                </button>
-              </div>
-
-              <div className="pt-4 border-t border-primary/5 mt-4">
-                <Button
-                  className="w-full bg-surface-container-highest text-on-surface/70 hover:text-primary font-headline font-semibold uppercase tracking-[0.2em] py-3 hover:bg-surface-bright active:scale-[0.95] rounded border border-primary/5 hover:border-primary/20 transition-all duration-300 text-[10px]"
-                  onClick={() => router.push("/workspace")}
-                >
-                  Bypass Protocol
-                </Button>
-              </div>
-            </div>
-          </form>
 
           <div className="mt-8 text-center">
             <a

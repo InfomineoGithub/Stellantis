@@ -8,8 +8,6 @@ import { Button, GoogleIcon } from "./ui";
 
 export function HomePage() {
   const router = useRouter();
-  const [email, setEmail] = React.useState("");
-  const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
   const handleGoogleSignIn = async () => {
@@ -19,21 +17,7 @@ export function HomePage() {
     });
   };
 
-  const handleEmailSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await authClient.signIn.email({
-        email,
-        password,
-        callbackURL: "/workspace",
-      });
-    } catch (error) {
-      console.error("Sign in failed", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   return (
     <div className="bg-surface text-on-surface font-body selection:bg-primary/30 min-h-screen flex flex-col">
@@ -123,52 +107,14 @@ export function HomePage() {
                     </span>
                   </Button>
 
-                  <div className="relative py-2">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-white/5"></div>
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase tracking-widest text-on-surface-variant/40">
-                      <span className="bg-surface-container-low px-3 italic">
-                        or
-                      </span>
-                    </div>
-                  </div>
-
-                  <form className="space-y-4" onSubmit={handleEmailSignIn}>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-widest text-on-surface-variant/60 ml-1">
-                        Terminal ID (Email)
-                      </label>
-                      <input
-                        className="w-full bg-surface-container-lowest border border-white/5 focus:border-primary/50 focus:ring-0 transition-all py-3.5 px-4 text-sm placeholder:text-on-surface-variant/30 rounded"
-                        placeholder="user@kinetic-systems.com"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-widest text-on-surface-variant/60 ml-1">
-                        Passcode
-                      </label>
-                      <input
-                        className="w-full bg-surface-container-lowest border border-white/5 focus:border-primary/50 focus:ring-0 transition-all py-3.5 px-4 text-sm placeholder:text-on-surface-variant/30 rounded"
-                        placeholder="Enter password"
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                      />
-                    </div>
+                  <div className="pt-4">
                     <Button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full bg-primary text-on-primary-container font-bold py-4 rounded hover:bg-primary/90 shadow-lg mt-4"
+                      onClick={() => router.push("/workspace")}
+                      className="w-full bg-surface-container-highest text-on-surface/70 hover:text-primary font-headline font-semibold uppercase tracking-[0.2em] py-4 hover:bg-surface-bright active:scale-[0.98] rounded border border-white/5 transition-all duration-300 text-xs"
                     >
-                      {loading ? "Authenticating..." : "Authenticate"}
+                      Bypass Protocol
                     </Button>
-                  </form>
+                  </div>
                 </div>
               </div>
             </div>
