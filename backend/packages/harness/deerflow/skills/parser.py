@@ -3,8 +3,6 @@ from pathlib import Path
 
 from .types import Skill
 
-# done
-
 
 def parse_skill_file(skill_file: Path, category: str, relative_path: Path | None = None) -> Skill | None:
     """

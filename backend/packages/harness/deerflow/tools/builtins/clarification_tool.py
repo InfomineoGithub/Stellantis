@@ -2,8 +2,6 @@ from typing import Literal
 
 from langchain.tools import tool
 
-# done
-
 
 @tool("ask_clarification", parse_docstring=True, return_direct=True)
 def ask_clarification_tool(

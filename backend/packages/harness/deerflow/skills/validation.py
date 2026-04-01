@@ -2,7 +2,6 @@
 
 Pure-logic validation of SKILL.md frontmatter — no FastAPI or HTTP dependencies.
 """
-# done
 
 import re
 from pathlib import Path
