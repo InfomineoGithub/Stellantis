@@ -34,6 +34,18 @@ spec:
                   key: BETTER_AUTH_SECRET
             - name: BETTER_AUTH_URL
               value: {{ .Values.publicUrl | quote }}
+            - name: DATABASE_URL
+              value: {{ .Values.checkpointer.connectionString | quote }}
+            - name: BETTER_AUTH_GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "deerflow.fullname" . }}-secrets
+                  key: BETTER_AUTH_GOOGLE_CLIENT_ID
+            - name: BETTER_AUTH_GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "deerflow.fullname" . }}-secrets
+                  key: BETTER_AUTH_GOOGLE_CLIENT_SECRET
           livenessProbe:
             httpGet:
               path: /
