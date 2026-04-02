@@ -1,4 +1,4 @@
-# Backend Development Dockerfile
+# Backend Dockerfile
 FROM python:3.12-slim
 
 ARG NODE_MAJOR=22
