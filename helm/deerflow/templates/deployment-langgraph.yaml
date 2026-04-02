@@ -43,6 +43,8 @@ spec:
               value: "true"
             - name: DEER_FLOW_HOME
               value: /app/backend/.deer-flow
+            - name: BETTER_AUTH_URL
+              value: "http://{{ include "deerflow.fullname" . }}-frontend:3000"
             - name: DEER_FLOW_CONFIG_PATH
               value: /app/config.yaml
             - name: DEER_FLOW_EXTENSIONS_CONFIG_PATH
