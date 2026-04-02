@@ -19,6 +19,15 @@ spec:
       annotations:
         checksum/config: {{ include (print .Template.BasePath "/configmap-deerflow.yaml") . | sha256sum }}
     spec:
+      initContainers:
+        - name: sync-skills
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command: ["sh", "-c", "cp -r /app/skills/public /mnt/skills/"]
+          volumeMounts:
+            - name: deer-flow-home
+              mountPath: /mnt/skills
+              subPath: skills
       containers:
         - name: langgraph
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
