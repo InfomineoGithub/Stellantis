@@ -73,8 +73,8 @@ spec:
             - name: deer-flow-home
               mountPath: /app/backend/.deer-flow
             - name: deer-flow-home
-              mountPath: /app/skills
-              subPath: skills
+              mountPath: /app/skills/custom
+              subPath: skills/custom
             - name: deer-flow-home
               mountPath: /app/backend/.langgraph_api
               subPath: langgraph_api
