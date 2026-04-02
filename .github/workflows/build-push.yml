@@ -26,6 +26,7 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
+              - 'skills/**'
             frontend:
               - 'frontend/**'
             provisioner:
