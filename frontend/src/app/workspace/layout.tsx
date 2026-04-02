@@ -1,6 +1,7 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { Toaster } from "sonner";
 
@@ -13,8 +14,18 @@ const queryClient = new QueryClient();
 export default function WorkspaceLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const router = useRouter();
   const [settings, setSettings] = useLocalSettings();
   const [open, setOpen] = useState(false); // SSR default: open (matches server render)
+
+  useEffect(() => {
+    void fetch("/api/me").then((res) => {
+      if (res.status === 401) {
+        router.replace("/");
+      }
+    });
+  }, [router]);
+
   useLayoutEffect(() => {
     // Runs synchronously before first paint on the client — no visual flash
     setOpen(!getLocalSettings().layout.sidebar_collapsed);

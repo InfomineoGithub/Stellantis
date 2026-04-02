@@ -3,9 +3,10 @@
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.gateway.dependencies import get_current_user
 from deerflow.config.paths import VIRTUAL_PATH_PREFIX, get_paths
 from deerflow.sandbox.sandbox_provider import get_sandbox_provider
 from deerflow.utils.file_conversion import CONVERTIBLE_EXTENSIONS, convert_file_to_markdown
@@ -41,6 +42,7 @@ def get_uploads_dir(thread_id: str) -> Path:
 async def upload_files(
     thread_id: str,
     files: list[UploadFile] = File(...),
+    _user: dict = Depends(get_current_user),
 ) -> UploadResponse:
     """Upload multiple files to a thread's uploads directory.
 
@@ -129,7 +131,7 @@ async def upload_files(
 
 
 @router.get("/list", response_model=dict)
-async def list_uploaded_files(thread_id: str) -> dict:
+async def list_uploaded_files(thread_id: str, _user: dict = Depends(get_current_user)) -> dict:
     """List all files in a thread's uploads directory.
 
     Args:
@@ -164,7 +166,7 @@ async def list_uploaded_files(thread_id: str) -> dict:
 
 
 @router.delete("/{filename}")
-async def delete_uploaded_file(thread_id: str, filename: str) -> dict:
+async def delete_uploaded_file(thread_id: str, filename: str, _user: dict = Depends(get_current_user)) -> dict:
     """Delete a file from a thread's uploads directory.
 
     Args:
