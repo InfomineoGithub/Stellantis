@@ -6,7 +6,9 @@ metadata:
     {{- include "deerflow.labels" . | nindent 4 }}
     app.kubernetes.io/component: langgraph
 spec:
+  {{- if not .Values.autoscaling.langgraph.enabled }}
   replicas: {{ .Values.replicaCount.langgraph }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "deerflow.selectorLabels" . | nindent 6 }}

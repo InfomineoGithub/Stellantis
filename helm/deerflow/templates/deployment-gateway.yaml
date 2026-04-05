@@ -6,7 +6,9 @@ metadata:
     {{- include "deerflow.labels" . | nindent 4 }}
     app.kubernetes.io/component: gateway
 spec:
+  {{- if not .Values.autoscaling.gateway.enabled }}
   replicas: {{ .Values.replicaCount.gateway }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "deerflow.selectorLabels" . | nindent 6 }}

@@ -6,7 +6,9 @@ metadata:
     {{- include "deerflow.labels" . | nindent 4 }}
     app.kubernetes.io/component: nginx
 spec:
+  {{- if not .Values.autoscaling.nginx.enabled }}
   replicas: {{ .Values.replicaCount.nginx }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "deerflow.selectorLabels" . | nindent 6 }}

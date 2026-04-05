@@ -1,0 +1,53 @@
+{{- $services := dict
+  "nginx" .Values.autoscaling.nginx
+  "frontend" .Values.autoscaling.frontend
+  "gateway" .Values.autoscaling.gateway
+  "langgraph" .Values.autoscaling.langgraph
+}}
+{{- range $component, $config := $services }}
+{{- if $config.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "deerflow.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "deerflow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "deerflow.fullname" $ }}-{{ $component }}
+  minReplicas: {{ $config.minReplicas }}
+  maxReplicas: {{ $config.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $config.targetCPUUtilizationPercentage }}
+    {{- if $config.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $config.targetMemoryUtilizationPercentage }}
+    {{- end }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+{{- end }}
+{{- end }}
