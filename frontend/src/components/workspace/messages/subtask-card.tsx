@@ -129,7 +129,7 @@ export function SubtaskCard({
                 <Streamdown
                   {...streamdownPluginsWithWordAnimation}
                   components={{
-                    p: ({ node, ...props }: any) => <div {...props} className={cn("mb-2 last:mb-0", props.className)} />,
+                    p: (props: React.HTMLAttributes<HTMLDivElement>) => <div {...props} className={cn("mb-2 last:mb-0", props.className)} />,
                     a: CitationLink,
                   }}
                 >
