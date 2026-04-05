@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import type { HTMLAttributes } from "react";
+import type { AnchorHTMLAttributes, HTMLAttributes } from "react";
+
+import { cn } from "@/lib/utils";
 
 import {
   MessageResponse,
@@ -30,7 +32,8 @@ export function MarkdownContent({
 }: MarkdownContentProps) {
   const components = useMemo(() => {
     return {
-      a: (props: HTMLAttributes<HTMLAnchorElement>) => {
+      p: ({ node, ...props }: any) => <div {...props} className={cn("mb-2 last:mb-0", props.className)} />,
+      a: (props: AnchorHTMLAttributes<HTMLAnchorElement>) => {
         if (typeof props.children === "string") {
           const match = /^citation:(.+)$/.exec(props.children);
           if (match) {

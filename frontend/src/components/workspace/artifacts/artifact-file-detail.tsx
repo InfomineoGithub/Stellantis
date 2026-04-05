@@ -35,6 +35,7 @@ import { useI18n } from "@/core/i18n/hooks";
 import { installSkill } from "@/core/skills/api";
 import { streamdownPlugins } from "@/core/streamdown";
 import { checkCodeFile, getFileName } from "@/core/utils/files";
+import { fetchWithAuth } from "@/core/api/auth-fetch";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
@@ -93,6 +94,7 @@ export function ArtifactFileDetail({
 
   const [viewMode, setViewMode] = useState<"code" | "preview">("code");
   const [isInstalling, setIsInstalling] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const { isMock } = useThread();
   useEffect(() => {
     if (isSupportPreview) {
@@ -123,6 +125,33 @@ export function ArtifactFileDetail({
       setIsInstalling(false);
     }
   }, [threadId, filepath, isInstalling]);
+
+  const handleDownload = useCallback(async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const url = urlOfArtifact({ filepath, threadId, download: true });
+      const res = await fetchWithAuth(url);
+      if (!res.ok) {
+        throw new Error(`Failed to download: ${res.statusText}`);
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = getFileName(filepath) || "download";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error("Failed to download artifact");
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [filepath, threadId, isDownloading]);
+
   return (
     <Artifact className={cn(className)}>
       <ArtifactHeader className="px-2">
@@ -214,16 +243,13 @@ export function ArtifactFileDetail({
               />
             )}
             {!isWriteFile && (
-              <a
-                href={urlOfArtifact({ filepath, threadId, download: true })}
-                target="_blank"
-              >
-                <ArtifactAction
-                  icon={DownloadIcon}
-                  label={t.common.download}
-                  tooltip={t.common.download}
-                />
-              </a>
+              <ArtifactAction
+                icon={isDownloading ? LoaderIcon : DownloadIcon}
+                label={t.common.download}
+                tooltip={t.common.download}
+                onClick={handleDownload}
+                disabled={isDownloading}
+              />
             )}
             <ArtifactAction
               icon={XIcon}

@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { fetchWithAuth } from "@/core/api/auth-fetch";
 import { urlOfArtifact } from "@/core/artifacts/utils";
 import { useI18n } from "@/core/i18n/hooks";
 import { installSkill } from "@/core/skills/api";
@@ -34,6 +35,7 @@ export function ArtifactFileList({
   const { t } = useI18n();
   const { select: selectArtifact, setOpen } = useArtifacts();
   const [installingFile, setInstallingFile] = useState<string | null>(null);
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
 
   const handleClick = useCallback(
     (filepath: string) => {
@@ -71,6 +73,38 @@ export function ArtifactFileList({
     [threadId, installingFile],
   );
 
+  const handleDownload = useCallback(
+    async (e: React.MouseEvent, filepath: string) => {
+      e.stopPropagation();
+      e.preventDefault();
+
+      if (downloadingFile) return;
+      setDownloadingFile(filepath);
+      try {
+        const url = urlOfArtifact({ filepath, threadId, download: true });
+        const res = await fetchWithAuth(url);
+        if (!res.ok) {
+          throw new Error(`Failed to download: ${res.statusText}`);
+        }
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = getFileName(filepath) || "download";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objectUrl);
+      } catch (error) {
+        console.error("Download failed:", error);
+        toast.error("Failed to download artifact");
+      } finally {
+        setDownloadingFile(null);
+      }
+    },
+    [threadId, downloadingFile],
+  );
+
   return (
     <ul className={cn("flex w-full flex-col gap-4", className)}>
       {files.map((file) => (
@@ -104,20 +138,18 @@ export function ArtifactFileList({
                   {t.common.install}
                 </Button>
               )}
-              <a
-                href={urlOfArtifact({
-                  filepath: file,
-                  threadId: threadId,
-                  download: true,
-                })}
-                target="_blank"
-                onClick={(e) => e.stopPropagation()}
+              <Button
+                variant="ghost"
+                disabled={downloadingFile === file}
+                onClick={(e) => handleDownload(e, file)}
               >
-                <Button variant="ghost">
+                {downloadingFile === file ? (
+                  <LoaderIcon className="size-4 animate-spin" />
+                ) : (
                   <DownloadIcon className="size-4" />
-                  {t.common.download}
-                </Button>
-              </a>
+                )}
+                {t.common.download}
+              </Button>
             </CardAction>
           </CardHeader>
         </Card>

@@ -121,6 +121,7 @@ function MessageContent_({
   const { thread_id } = useParams<{ thread_id: string }>();
   const components = useMemo(
     () => ({
+      p: ({ node, ...props }: any) => <div {...props} />,
       img: (props: ImgHTMLAttributes<HTMLImageElement>) => (
         <MessageImage {...props} threadId={thread_id} maxWidth="90%" />
       ),
