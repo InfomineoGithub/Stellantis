@@ -128,7 +128,10 @@ export function SubtaskCard({
               label={
                 <Streamdown
                   {...streamdownPluginsWithWordAnimation}
-                  components={{ a: CitationLink }}
+                  components={{
+                    p: ({ node, ...props }: any) => <div {...props} className={cn("mb-2 last:mb-0", props.className)} />,
+                    a: CitationLink,
+                  }}
                 >
                   {task.prompt}
                 </Streamdown>
