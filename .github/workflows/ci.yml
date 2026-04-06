@@ -54,7 +54,7 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: make test PYTEST_ARGS="--ignore=tests/integration/"
+        run: make test
 
   frontend:
     if: github.event.pull_request.draft == false
