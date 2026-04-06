@@ -458,5 +458,59 @@ No `other` value in any enum. Enums are extended by adding new members in future
 
 ---
 
+---
+
+## ADR-014: JWT Bearer Tokens as the Identity Transport Between Frontend and Backend Services
+
+**Status:** Accepted
+**Date:** 2026-04-06
+
+### Context
+
+DeerFlow 2.0 runs as three independent services behind an Nginx reverse proxy: the Next.js frontend (port 3000), the Gateway API (FastAPI, port 8001), and the LangGraph agent runtime (port 2024). Users authenticate exclusively via Google OAuth — email/password is disabled. There is no RBAC; any authenticated user can access all endpoints.
+
+The question is how the frontend proves the caller's identity to the backend services after authentication. Two viable approaches exist:
+
+1. **Cookie-forwarding (session proxy):** The browser sends the Better Auth session cookie to the backend. The backend makes a network call to Next.js to exchange the cookie for identity claims on every request.
+2. **JWT bearer tokens:** Better Auth issues a short-lived signed JWT. The frontend caches it and attaches it as `Authorization: Bearer <token>` on every request. The backend validates the signature locally using a shared secret.
+
+### Decision
+
+Use **short-lived JWT bearer tokens** (HS256, signed by `BETTER_AUTH_SECRET`) as the identity transport.
+
+Better Auth's `jwt()` plugin exposes `/api/auth/token`. The frontend's `fetchWithAuth` calls this endpoint when a valid session cookie exists, caches the returned JWT for 14 minutes (token TTL is 15 minutes), and attaches it as an `Authorization: Bearer <token>` header on all requests to the Gateway API and LangGraph server.
+
+Both backend services validate the token using the shared `verify_jwt()` function from the `stellantis-auth` package:
+
+```
+Strategy: Try HS256 with BETTER_AUTH_SECRET (fast, no network) →
+          Fall back to JWKS at /api/auth/jwks (asymmetric, for future key rotation)
+```
+
+The Gateway injects the validated payload via `Depends(get_current_user)`. LangGraph registers `@auth.authenticate` in `langgraph.json`. Both share the same `verify_jwt()` implementation.
+
+A `BYPASS_AUTH=true` environment variable skips validation in local development. This flag is checked at runtime in both services.
+
+### Alternatives considered
+
+- **Cookie-forwarding (session proxy):** The browser sends the session cookie; backends call Next.js `/api/auth/token` (or a custom introspection endpoint) on every request to resolve identity. Rejected because: it creates a hard runtime dependency from every backend service to the Next.js server on every authenticated request; LangGraph's `@auth.authenticate` hook has no standard HTTP client; and it prevents horizontal scaling of backends without sticky sessions or a shared Next.js session store.
+
+- **Asymmetric JWT (RS256 / EdDSA via JWKS only):** Eliminates the shared-secret coordination problem — backends fetch the public key from the JWKS endpoint without knowing the private key. Not chosen as the primary strategy because it introduces a network round-trip for key discovery and requires asymmetric key infrastructure. The JWKS fallback is already implemented in `verifier.py` and can be promoted to the primary strategy without changing callers.
+
+### Consequences
+
+- **Positive:** Validation is stateless and network-free (HS256 path). Both backend services use the same `verify_jwt()` call — adding a new service requires only sharing `BETTER_AUTH_SECRET`. Token caching in the frontend (14-min TTL, 15-min token) keeps round-trips to `/api/auth/token` minimal.
+- **Negative:** `BETTER_AUTH_SECRET` must be consistent across all services — rotating it invalidates all live tokens immediately. No revocation before expiry: if a user's Google account is suspended, existing JWTs remain valid for up to 15 minutes (acceptable without RBAC).
+- **Accepted trade-off:** The 15-minute expiry window on non-revocable tokens is acceptable at this stage. Rotation risk is mitigated by deploying all services in a single coordinated step. If revocation or finer-grained control is needed in a later phase, the JWKS path supports key rotation without changing the validation interface.
+- **Key files:**
+  - Token fetch and 14-min cache: `frontend/src/core/api/auth-fetch.ts`
+  - LangGraph client header injection: `frontend/src/core/api/api-client.ts`
+  - Better Auth config (`jwt()` plugin): `frontend/src/server/better-auth/config.ts`
+  - Shared JWT verifier (HS256 + JWKS): `backend/packages/auth/jwt_auth/verifier.py`
+  - Gateway dependency: `backend/app/gateway/dependencies.py`
+  - LangGraph auth hook: `backend/src/auth.py`
+
+---
+
 *ADRs.md — Phase 1: Business Domain Integration*
 *Created: 2026-04-05*
