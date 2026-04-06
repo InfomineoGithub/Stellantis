@@ -214,7 +214,7 @@ def _build_middlewares(config: RunnableConfig, model_name: str | None, agent_nam
     Returns:
         List of middleware instances.
     """
-    middlewares = build_lead_runtime_middlewares(lazy_init=True)
+    middlewares = build_lead_runtime_middlewares(lazy_init=False)
 
     # Add summarization middleware if enabled
     summarization_middleware = _create_summarization_middleware()
@@ -276,7 +276,6 @@ def make_lead_agent(config: RunnableConfig):
     # Final model name resolution with request override, then agent config, then global default
     model_name = requested_model_name or agent_model_name
 
-    print(model_name)
     app_config = get_app_config()
     model_config = app_config.get_model_config(model_name) if model_name else None
 

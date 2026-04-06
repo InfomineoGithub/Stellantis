@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo } from "react";
-import type { HTMLAttributes } from "react";
+import type { AnchorHTMLAttributes } from "react";
+
 
 import {
   MessageResponse,
   type MessageResponseProps,
 } from "@/components/ai-elements/message";
 import { streamdownPlugins } from "@/core/streamdown";
+import { cn } from "@/lib/utils";
 
 import { CitationLink } from "../citations/citation-link";
 
@@ -30,7 +32,8 @@ export function MarkdownContent({
 }: MarkdownContentProps) {
   const components = useMemo(() => {
     return {
-      a: (props: HTMLAttributes<HTMLAnchorElement>) => {
+      p: (props: React.HTMLAttributes<HTMLDivElement>) => <div {...props} className={cn("mb-2 last:mb-0", props.className)} />,
+      a: (props: AnchorHTMLAttributes<HTMLAnchorElement>) => {
         if (typeof props.children === "string") {
           const match = /^citation:(.+)$/.exec(props.children);
           if (match) {
