@@ -38,9 +38,7 @@ class SourceService:
 
     async def update(self, id: UUID, input: UpdateSourceInput) -> Source:
         source = await self.get(id)
-        updated = source.model_copy(update={
-            k: v for k, v in input.model_dump(exclude_unset=True).items() if v is not None
-        })
+        updated = source.model_copy(update={k: v for k, v in input.model_dump(exclude_unset=True).items() if v is not None})
         updated = updated.model_copy(update={"updated_at": datetime.now(UTC)})
         return await self._repo.update(updated)
 
@@ -53,6 +51,7 @@ class SourceService:
         if self._vehicle_repo:
             vehicle = await self._vehicle_repo.get(vehicle_id)
             from app.domain.exceptions import VehicleNotFoundError
+
             if vehicle is None:
                 raise VehicleNotFoundError(f"Vehicle {vehicle_id} not found")
         await self._repo.link_vehicle(source_id, vehicle_id)

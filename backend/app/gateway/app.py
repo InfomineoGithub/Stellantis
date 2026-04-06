@@ -16,7 +16,8 @@ from app.gateway.routers import (
     suggestions,
     uploads,
 )
-from app.routers import vehicles as vehicles_router, sources as sources_router
+from app.routers import sources as sources_router
+from app.routers import vehicles as vehicles_router
 from deerflow.config.app_config import get_app_config
 
 # Configure logging

@@ -79,11 +79,7 @@ class PostgresVehicleRepository:
         return self._to_domain(row)
 
     async def get_with_sources(self, id: UUID) -> Vehicle | None:
-        result = await self._session.execute(
-            select(VehicleTable)
-            .options(selectinload(VehicleTable.sources))
-            .where(VehicleTable.id == id)
-        )
+        result = await self._session.execute(select(VehicleTable).options(selectinload(VehicleTable.sources)).where(VehicleTable.id == id))
         row = result.scalar_one_or_none()
         if row is None:
             return None
@@ -98,16 +94,16 @@ class PostgresVehicleRepository:
         row = result.scalar_one_or_none()
         if row is None:
             raise VehicleNotFoundError(f"Vehicle {vehicle.id} not found")
-        row.manufacturer  = vehicle.manufacturer
-        row.model_name    = vehicle.model_name
+        row.manufacturer = vehicle.manufacturer
+        row.model_name = vehicle.model_name
         row.vehicle_class = vehicle.vehicle_class.value
-        row.year          = vehicle.year
-        row.body_type     = vehicle.body_type.value
-        row.transmission  = vehicle.transmission.value
-        row.fuel_type     = vehicle.fuel_type.value
+        row.year = vehicle.year
+        row.body_type = vehicle.body_type.value
+        row.transmission = vehicle.transmission.value
+        row.fuel_type = vehicle.fuel_type.value
         row.thumbnail_url = vehicle.thumbnail_url
-        row.notes         = vehicle.notes
-        row.updated_at    = vehicle.updated_at
+        row.notes = vehicle.notes
+        row.updated_at = vehicle.updated_at
         try:
             await self._session.flush()
         except IntegrityError as e:

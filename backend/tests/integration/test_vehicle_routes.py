@@ -12,9 +12,9 @@ from tests.fakes.vehicle_repository import InMemoryVehicleRepository
 @pytest.fixture(autouse=True)
 def override_repos():
     vehicle_repo = InMemoryVehicleRepository()
-    source_repo  = InMemorySourceRepository()
-    app.dependency_overrides[get_vehicle_repo]    = lambda: vehicle_repo
-    app.dependency_overrides[get_source_repo]     = lambda: source_repo
+    source_repo = InMemorySourceRepository()
+    app.dependency_overrides[get_vehicle_repo] = lambda: vehicle_repo
+    app.dependency_overrides[get_source_repo] = lambda: source_repo
     app.dependency_overrides[get_vehicle_service] = lambda: VehicleService(vehicle_repo)
     yield
     app.dependency_overrides.clear()
@@ -63,6 +63,7 @@ async def test_list_vehicles_returns_200(client):
 @pytest.mark.asyncio
 async def test_get_vehicle_not_found_returns_404(client):
     from uuid import uuid4
+
     resp = await client.get(f"/api/vehicles/{uuid4()}")
     assert resp.status_code == 404
 

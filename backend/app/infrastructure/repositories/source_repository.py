@@ -85,10 +85,10 @@ class PostgresSourceRepository:
         if row is None:
             raise SourceNotFoundError(f"Source {source.id} not found")
         row.source_type = source.source_type.value
-        row.url         = source.url
+        row.url = source.url
         row.description = source.description
-        row.is_active   = source.is_active
-        row.updated_at  = source.updated_at
+        row.is_active = source.is_active
+        row.updated_at = source.updated_at
         try:
             await self._session.flush()
         except IntegrityError as e:
@@ -121,9 +121,7 @@ class PostgresSourceRepository:
         )
         if existing.first() is not None:
             raise VehicleSourceLinkError(f"Vehicle {vehicle_id} already linked to source {source_id}")
-        await self._session.execute(
-            vehicle_sources.insert().values(vehicle_id=vehicle_id, source_id=source_id)
-        )
+        await self._session.execute(vehicle_sources.insert().values(vehicle_id=vehicle_id, source_id=source_id))
         await self._session.flush()
 
     async def unlink_vehicle(self, source_id: UUID, vehicle_id: UUID) -> None:
@@ -146,9 +144,5 @@ class PostgresSourceRepository:
     async def get_vehicles_for_source(self, source_id: UUID) -> list[Vehicle]:
         if (await self._session.execute(select(SourceTable).where(SourceTable.id == source_id))).scalar_one_or_none() is None:
             raise SourceNotFoundError(f"Source {source_id} not found")
-        result = await self._session.execute(
-            select(VehicleTable)
-            .join(vehicle_sources, VehicleTable.id == vehicle_sources.c.vehicle_id)
-            .where(vehicle_sources.c.source_id == source_id)
-        )
+        result = await self._session.execute(select(VehicleTable).join(vehicle_sources, VehicleTable.id == vehicle_sources.c.vehicle_id).where(vehicle_sources.c.source_id == source_id))
         return [self._vehicle_to_domain(row) for row in result.scalars().all()]

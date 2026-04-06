@@ -26,13 +26,20 @@ async def test_create_source_happy_path(service):
 async def test_link_vehicle_happy_path():
     from app.domain.vehicle import BodyType, FuelType, Transmission, Vehicle, VehicleClass
     from tests.fakes.vehicle_repository import InMemoryVehicleRepository
+
     vehicle_repo = InMemoryVehicleRepository()
     source_repo = InMemorySourceRepository()
     vehicle = Vehicle(
-        id=uuid4(), manufacturer="Toyota", model_name="Camry",
-        vehicle_class=VehicleClass.midsize, year=2024, body_type=BodyType.sedan,
-        transmission=Transmission.automatic, fuel_type=FuelType.gasoline,
-        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        id=uuid4(),
+        manufacturer="Toyota",
+        model_name="Camry",
+        vehicle_class=VehicleClass.midsize,
+        year=2024,
+        body_type=BodyType.sedan,
+        transmission=Transmission.automatic,
+        fuel_type=FuelType.gasoline,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     await vehicle_repo.add(vehicle)
     service = SourceService(source_repo, vehicle_repo)

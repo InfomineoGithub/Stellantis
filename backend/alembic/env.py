@@ -1,16 +1,15 @@
 import asyncio
-import os
 from logging.config import fileConfig
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
+import app.infrastructure.models.associations  # noqa: F401
+import app.infrastructure.models.source  # noqa: F401
+import app.infrastructure.models.vehicle  # noqa: F401
 from alembic import context
 
 # Import all models so Alembic can detect them
-from app.infrastructure.database import Base, DATABASE_URL  # noqa: F401
-import app.infrastructure.models.vehicle  # noqa: F401
-import app.infrastructure.models.source   # noqa: F401
-import app.infrastructure.models.associations  # noqa: F401
+from app.infrastructure.database import Base, settings
 
 config = context.config
 if config.config_file_name is not None:
@@ -18,9 +17,11 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+print(settings)
+
 
 def run_migrations_offline() -> None:
-    url = DATABASE_URL
+    url = settings.DATABASE_URL
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -38,7 +39,7 @@ def do_run_migrations(connection):
 
 
 def run_migrations_online() -> None:
-    connectable = create_async_engine(DATABASE_URL)
+    connectable = create_async_engine(settings.DATABASE_URL)
 
     async def run_async_migrations():
         async with connectable.connect() as connection:

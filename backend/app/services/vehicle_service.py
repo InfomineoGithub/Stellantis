@@ -47,9 +47,7 @@ class VehicleService:
 
     async def update(self, id: UUID, input: UpdateVehicleInput) -> Vehicle:
         vehicle = await self.get(id)
-        updated = vehicle.model_copy(update={
-            k: v for k, v in input.model_dump(exclude_unset=True).items() if v is not None
-        })
+        updated = vehicle.model_copy(update={k: v for k, v in input.model_dump(exclude_unset=True).items() if v is not None})
         updated = updated.model_copy(update={"updated_at": datetime.now(UTC)})
         return await self._repo.update(updated)
 
