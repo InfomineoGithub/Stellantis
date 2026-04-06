@@ -16,6 +16,8 @@ from app.gateway.routers import (
     suggestions,
     uploads,
 )
+from app.routers import sources as sources_router
+from app.routers import vehicles as vehicles_router
 from deerflow.config.app_config import get_app_config
 
 # Configure logging
@@ -143,6 +145,8 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
                 "name": "health",
                 "description": "Health check and system status endpoints",
             },
+            {"name": "vehicles", "description": "CRUD for vehicle domain entities"},
+            {"name": "sources", "description": "CRUD for source domain entities and vehicle links"},
         ],
     )
 
@@ -175,6 +179,12 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
 
     # Channels API is mounted at /api/channels
     app.include_router(channels.router)
+
+    # Vehicles API is mounted at /api/vehicles
+    app.include_router(vehicles_router.router)
+
+    # Sources API is mounted at /api/sources
+    app.include_router(sources_router.router)
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict:
