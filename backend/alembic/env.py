@@ -21,7 +21,7 @@ print(settings)
 
 
 def run_migrations_offline() -> None:
-    url = settings.DATABASE_URL
+    url = settings.DOMAIN_DATABASE_URL
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -39,7 +39,7 @@ def do_run_migrations(connection):
 
 
 def run_migrations_online() -> None:
-    connectable = create_async_engine(settings.DATABASE_URL)
+    connectable = create_async_engine(settings.DOMAIN_DATABASE_URL)
 
     async def run_async_migrations():
         async with connectable.connect() as connection:

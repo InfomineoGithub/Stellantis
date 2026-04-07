@@ -14,12 +14,12 @@ _env_file = str(_backend_env) if _backend_env.exists() else str(_root_env) if _r
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=_env_file, extra="ignore")
 
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/stellantis"
+    DOMAIN_DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/stellantis"
 
 
 settings = Settings()
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
+engine = create_async_engine(settings.DOMAIN_DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
