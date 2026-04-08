@@ -12,6 +12,6 @@
     "path": "./packages/harness/deerflow/agents/checkpointer/async_provider.py:make_checkpointer"
   },
   "auth": {
-    "path": "./src/auth.py:auth"
+    "path": "./auth.py:auth"
   }
 }
