@@ -1,6 +1,5 @@
 """Memory API router for retrieving and managing global memory data."""
 
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 

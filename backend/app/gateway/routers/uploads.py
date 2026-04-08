@@ -135,7 +135,7 @@ async def upload_files(
 
 
 @router.get("/list", response_model=dict)
-async def list_uploaded_files(thread_id: str,  _user: dict = Depends(get_current_user)) -> dict:
+async def list_uploaded_files(thread_id: str, _user: dict = Depends(get_current_user)) -> dict:
     """List all files in a thread's uploads directory."""
     try:
         uploads_dir = get_uploads_dir(thread_id)
@@ -153,7 +153,7 @@ async def list_uploaded_files(thread_id: str,  _user: dict = Depends(get_current
 
 
 @router.delete("/{filename}")
-async def delete_uploaded_file(thread_id: str, filename: str,  _user: dict = Depends(get_current_user)) -> dict:
+async def delete_uploaded_file(thread_id: str, filename: str, _user: dict = Depends(get_current_user)) -> dict:
     """Delete a file from a thread's uploads directory."""
     try:
         uploads_dir = get_uploads_dir(thread_id)
