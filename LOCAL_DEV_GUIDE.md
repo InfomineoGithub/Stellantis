@@ -20,6 +20,7 @@
    - [Configure an LLM model](#42-configure-an-llm-model)
    - [Set API keys](#43-set-api-keys)
    - [Database Schema (Better Auth)](#44-database-schema-better-auth)
+   - [Domain Database (PostgreSQL + Alembic)](#45-domain-database-postgresql--alembic)
 5. [Install All Dependencies](#5-install-all-dependencies)
 6. [Running the Full Stack Locally (Fast Dev Mode)](#6-running-the-full-stack-locally-fast-dev-mode)
    - [Option A — One command (all services)](#option-a--one-command-all-services-easiest)
@@ -260,6 +261,72 @@ npx better-auth migrate --config ./src/server/better-auth/config.ts
 
 ---
 
+### 4.5 Domain Database (PostgreSQL + Alembic)
+
+**Why:** The Vehicle and Source domain entities are persisted to PostgreSQL via async SQLAlchemy. You need a local Postgres instance running and Alembic migrations applied before the Gateway API domain routes (`/api/vehicles`, `/api/sources`) will work.
+
+#### Install PostgreSQL
+
+Download the Windows installer from [postgresql.org/download/windows](https://www.postgresql.org/download/windows/) and run it. During setup:
+- Set a password for the `postgres` superuser (remember it — you'll use it below)
+- Keep the default port `5432`
+- Leave all other options at their defaults
+
+Verify Postgres is running after install:
+```powershell
+pg_isready -h localhost -p 5432
+# Expected: localhost:5432 - accepting connections
+```
+
+> **Alternative:** If you have Docker Desktop installed, you can spin up Postgres without a full install:
+> ```powershell
+> docker run -d --name stellantis-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+> ```
+
+#### Create the database
+
+Open the Postgres shell (`psql`) and create the database:
+```powershell
+psql -U postgres -c "CREATE DATABASE stellantis;"
+```
+
+Enter your postgres password when prompted.
+
+#### Set DATABASE_URL in .env
+
+Add the following line to your `.env` file in the project root (replace `postgres` with your actual password if different):
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/stellantis
+```
+
+#### Apply Alembic migrations
+
+From the `backend/` directory, run the migration to create the `vehicles`, `sources`, and `vehicle_sources` tables:
+
+```powershell
+cd backend
+$env:PYTHONPATH = "."
+uv run alembic upgrade head
+```
+
+Expected output:
+```
+INFO  [alembic.runtime.migration] Running upgrade  -> 001, initial_vehicles_sources
+```
+
+> **Note:** Re-run `alembic upgrade head` any time new migrations are added in future phases. To check the current migration state: `uv run alembic current`.
+
+#### Verify
+
+Test that the domain routes are reachable once the Gateway API is running:
+```powershell
+curl http://localhost:8001/api/vehicles   # Should return []
+curl http://localhost:8001/api/sources    # Should return []
+```
+
+---
+
 ## 5. Install All Dependencies
 
 **Why:** This installs all Python packages (backend) and all Node.js packages (frontend) into local environments.
@@ -418,13 +485,19 @@ Key directories:
 | Path | Purpose |
 |---|---|
 | `backend/app/gateway/app.py` | FastAPI application entry point |
-| `backend/app/gateway/routers/` | 6 route modules (models, mcp, skills, memory, uploads, artifacts) |
+| `backend/app/gateway/routers/` | Route modules (models, mcp, skills, memory, uploads, artifacts) |
+| `backend/app/routers/` | Domain routes — vehicles and sources |
+| `backend/app/domain/` | Pure Pydantic domain models and repository protocols |
+| `backend/app/infrastructure/` | SQLAlchemy models, Postgres repositories, database setup |
+| `backend/app/services/` | VehicleService, SourceService (business logic) |
 | `backend/app/channels/` | IM platform integrations (Slack, Telegram, Feishu) |
 
 Test an endpoint quickly with curl:
 ```powershell
 curl http://localhost:8001/health
 curl http://localhost:8001/api/models
+curl http://localhost:8001/api/vehicles    # Domain: list vehicles (requires DB)
+curl http://localhost:8001/api/sources     # Domain: list sources (requires DB)
 ```
 
 ---

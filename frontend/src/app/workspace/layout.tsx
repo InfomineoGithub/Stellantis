@@ -7,6 +7,7 @@ import { Toaster } from "sonner";
 
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WorkspaceSidebar } from "@/components/workspace/workspace-sidebar";
+import { fetchWithAuth } from "@/core/api/auth-fetch";
 import { getLocalSettings, useLocalSettings } from "@/core/settings";
 
 const queryClient = new QueryClient();
@@ -19,7 +20,7 @@ export default function WorkspaceLayout({
   const [open, setOpen] = useState(false); // SSR default: open (matches server render)
 
   useEffect(() => {
-    void fetch("/api/me").then((res) => {
+    void fetchWithAuth("/api/me").then((res) => {
       if (res.status === 401) {
         router.replace("/");
       }

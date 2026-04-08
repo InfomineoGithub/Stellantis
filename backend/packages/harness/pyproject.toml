@@ -1,6 +1,6 @@
 [project]
 name = "deerflow-harness"
-version = "0.1.0"
+version = "0.1.1"
 description = "DeerFlow agent harness framework"
 requires-python = ">=3.12"
 dependencies = [
@@ -29,6 +29,9 @@ dependencies = [
     "duckdb>=1.4.4",
     "langchain-google-genai>=4.2.1",
     "langgraph-checkpoint-sqlite>=3.0.3",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "psycopg[binary]>=3.1.0",
+    "psycopg-pool>=3.1.0",
     "langgraph-sdk>=0.1.51",
 ]
 

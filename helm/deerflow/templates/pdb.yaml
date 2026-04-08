@@ -1,0 +1,17 @@
+{{- $components := list "nginx" "frontend" "gateway" "langgraph" }}
+{{- range $component := $components }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "deerflow.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "deerflow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "deerflow.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
+{{- end }}

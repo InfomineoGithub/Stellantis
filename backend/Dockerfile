@@ -1,4 +1,4 @@
-# Backend Development Dockerfile
+# Backend Dockerfile
 FROM python:3.12-slim
 
 ARG NODE_MAJOR=22
@@ -25,8 +25,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.7.20 /uv /uvx /usr/local/bin/
 # Set working directory
 WORKDIR /app
 
-# Copy frontend source code
+# Copy backend source code and default skills
 COPY backend ./backend
+COPY skills ./skills
 
 # Install dependencies with cache mount
 RUN --mount=type=cache,target=/root/.cache/uv \

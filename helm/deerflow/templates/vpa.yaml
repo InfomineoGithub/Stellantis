@@ -1,0 +1,52 @@
+{{- if .Values.vpa.langgraph.enabled }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "deerflow.fullname" . }}-langgraph
+  labels:
+    {{- include "deerflow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: langgraph
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "deerflow.fullname" . }}-langgraph
+  updatePolicy:
+    updateMode: {{ .Values.vpa.langgraph.updateMode | quote }}
+  resourcePolicy:
+    containerPolicies:
+      - containerName: langgraph
+        minAllowed:
+          cpu: 500m
+          memory: 1Gi
+        maxAllowed:
+          cpu: "4"
+          memory: 8Gi
+{{- end }}
+{{- if .Values.vpa.provisioner.enabled }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "deerflow.fullname" . }}-provisioner
+  labels:
+    {{- include "deerflow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: provisioner
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "deerflow.fullname" . }}-provisioner
+  updatePolicy:
+    updateMode: {{ .Values.vpa.provisioner.updateMode | quote }}
+  resourcePolicy:
+    containerPolicies:
+      - containerName: provisioner
+        minAllowed:
+          cpu: 250m
+          memory: 512Mi
+        maxAllowed:
+          cpu: "1"
+          memory: 1Gi
+{{- end }}

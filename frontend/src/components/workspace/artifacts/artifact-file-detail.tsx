@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { CodeEditor } from "@/components/workspace/code-editor";
+import { fetchWithAuth } from "@/core/api/auth-fetch";
 import { useArtifactContent } from "@/core/artifacts/hooks";
 import { urlOfArtifact } from "@/core/artifacts/utils";
 import { useI18n } from "@/core/i18n/hooks";
@@ -38,7 +39,7 @@ import { checkCodeFile, getFileName } from "@/core/utils/files";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
-import { ArtifactLink } from "../citations/artifact-link";
+import { CitationLink } from "../citations/citation-link";
 import { useThread } from "../messages/context";
 import { Tooltip } from "../tooltip";
 
@@ -93,6 +94,7 @@ export function ArtifactFileDetail({
 
   const [viewMode, setViewMode] = useState<"code" | "preview">("code");
   const [isInstalling, setIsInstalling] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const { isMock } = useThread();
   useEffect(() => {
     if (isSupportPreview) {
@@ -123,6 +125,33 @@ export function ArtifactFileDetail({
       setIsInstalling(false);
     }
   }, [threadId, filepath, isInstalling]);
+
+  const handleDownload = useCallback(async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const url = urlOfArtifact({ filepath, threadId, download: true });
+      const res = await fetchWithAuth(url);
+      if (!res.ok) {
+        throw new Error(`Failed to download: ${res.statusText}`);
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = getFileName(filepath) || "download";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error("Failed to download artifact");
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [filepath, threadId, isDownloading]);
+
   return (
     <Artifact className={cn(className)}>
       <ArtifactHeader className="px-2">
@@ -214,16 +243,13 @@ export function ArtifactFileDetail({
               />
             )}
             {!isWriteFile && (
-              <a
-                href={urlOfArtifact({ filepath, threadId, download: true })}
-                target="_blank"
-              >
-                <ArtifactAction
-                  icon={DownloadIcon}
-                  label={t.common.download}
-                  tooltip={t.common.download}
-                />
-              </a>
+              <ArtifactAction
+                icon={isDownloading ? LoaderIcon : DownloadIcon}
+                label={t.common.download}
+                tooltip={t.common.download}
+                onClick={handleDownload}
+                disabled={isDownloading}
+              />
             )}
             <ArtifactAction
               icon={XIcon}
@@ -274,7 +300,7 @@ export function ArtifactFilePreview({
         <Streamdown
           className="size-full"
           {...streamdownPlugins}
-          components={{ a: ArtifactLink }}
+          components={{ a: CitationLink }}
         >
           {content ?? ""}
         </Streamdown>
