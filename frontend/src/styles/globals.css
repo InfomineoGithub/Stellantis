@@ -1,7 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
-
 
 @source "../node_modules/streamdown/dist/index.js";
 
@@ -441,19 +440,29 @@
   --color-surface-container-high: #222a3d;
   --color-inverse-on-surface: #283044;
   --color-surface-dim: #0b1326;
-  
+
   --font-headline: "Space Grotesk", sans-serif;
   --font-body: "Inter", sans-serif;
   --font-label: "Inter", sans-serif;
 }
 
 @layer base {
-  .minimal-border { border: 1px solid rgba(255, 255, 255, 0.05); }
+  .minimal-border {
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
   .feature-box {
-      background: linear-gradient(to bottom right, rgba(23, 31, 51, 0.4), rgba(11, 19, 38, 0.2));
-      border: 1px solid rgba(173, 198, 255, 0.05);
+    background: linear-gradient(
+      to bottom right,
+      rgba(23, 31, 51, 0.4),
+      rgba(11, 19, 38, 0.2)
+    );
+    border: 1px solid rgba(173, 198, 255, 0.05);
   }
   .material-symbols-outlined {
-      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    font-variation-settings:
+      "FILL" 0,
+      "wght" 400,
+      "GRAD" 0,
+      "opsz" 24;
   }
 }

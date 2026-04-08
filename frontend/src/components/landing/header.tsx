@@ -89,9 +89,9 @@ async function StarCounter() {
       {
         headers: env.GITHUB_OAUTH_TOKEN
           ? {
-            Authorization: `Bearer ${env.GITHUB_OAUTH_TOKEN}`,
-            "Content-Type": "application/json",
-          }
+              Authorization: `Bearer ${env.GITHUB_OAUTH_TOKEN}`,
+              "Content-Type": "application/json",
+            }
           : {},
         next: {
           revalidate: 3600,

@@ -515,9 +515,9 @@ export function useThreadStream({
   const mergedThread =
     optimisticMessages.length > 0
       ? ({
-        ...thread,
-        messages: [...thread.messages, ...optimisticMessages],
-      } as typeof thread)
+          ...thread,
+          messages: [...thread.messages, ...optimisticMessages],
+        } as typeof thread)
       : thread;
 
   return [mergedThread, sendMessage, isUploading] as const;

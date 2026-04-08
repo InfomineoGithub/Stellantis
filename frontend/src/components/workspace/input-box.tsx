@@ -396,16 +396,19 @@ export function InputBox({
     setFollowupsLoading(true);
     setFollowups([]);
 
-    fetchWithAuth(`${getBackendBaseURL()}/api/threads/${threadId}/suggestions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messages: recent,
-        n: 3,
-        model_name: context.model_name ?? undefined,
-      }),
-      signal: controller.signal,
-    })
+    fetchWithAuth(
+      `${getBackendBaseURL()}/api/threads/${threadId}/suggestions`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: recent,
+          n: 3,
+          model_name: context.model_name ?? undefined,
+        }),
+        signal: controller.signal,
+      },
+    )
       .then(async (res) => {
         if (!res.ok) {
           return { suggestions: [] as string[] };

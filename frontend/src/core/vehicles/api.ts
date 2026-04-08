@@ -23,7 +23,9 @@ export async function fetchVehicleWithSources(id: string): Promise<Vehicle> {
   return res.json() as Promise<Vehicle>;
 }
 
-export async function createVehicle(input: CreateVehicleInput): Promise<Vehicle> {
+export async function createVehicle(
+  input: CreateVehicleInput,
+): Promise<Vehicle> {
   const res = await fetchWithAuth(BASE(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -33,7 +35,10 @@ export async function createVehicle(input: CreateVehicleInput): Promise<Vehicle>
   return res.json() as Promise<Vehicle>;
 }
 
-export async function updateVehicle(id: string, input: UpdateVehicleInput): Promise<Vehicle> {
+export async function updateVehicle(
+  id: string,
+  input: UpdateVehicleInput,
+): Promise<Vehicle> {
   const res = await fetchWithAuth(`${BASE()}/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

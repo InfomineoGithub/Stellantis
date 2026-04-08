@@ -17,47 +17,45 @@ export function LoginPage() {
     });
   };
 
-
-
   return (
-    <div className="bg-background text-on-background min-h-screen flex flex-col">
-      <header className="bg-surface flex justify-between items-center w-full px-8 py-4 fixed top-0 z-50">
+    <div className="bg-background text-on-background flex min-h-screen flex-col">
+      <header className="bg-surface fixed top-0 z-50 flex w-full items-center justify-between px-8 py-4">
         <div
-          className="text-xl font-bold tracking-tighter text-primary font-headline cursor-pointer"
+          className="text-primary font-headline cursor-pointer text-xl font-bold tracking-tighter"
           onClick={() => router.push("/")}
         >
           AAPAS
         </div>
-        <nav className="hidden md:flex gap-8 items-center">
-          <span className="font-headline uppercase tracking-widest text-xs font-bold text-primary border-b-2 border-primary pb-1 cursor-default">
+        <nav className="hidden items-center gap-8 md:flex">
+          <span className="font-headline text-primary border-primary cursor-default border-b-2 pb-1 text-xs font-bold tracking-widest uppercase">
             Terminal Access
           </span>
         </nav>
-        <div className="flex items-center gap-4 text-primary">
-          <button className="material-symbols-outlined scale-95 active:scale-90 transition-transform">
+        <div className="text-primary flex items-center gap-4">
+          <button className="material-symbols-outlined scale-95 transition-transform active:scale-90">
             help_outline
           </button>
-          <button className="material-symbols-outlined scale-95 active:scale-90 transition-transform">
+          <button className="material-symbols-outlined scale-95 transition-transform active:scale-90">
             settings_input_component
           </button>
         </div>
       </header>
 
-      <main className="flex-grow flex items-center justify-center p-6 relative pt-20 pb-20">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px]"></div>
+      <main className="relative flex flex-grow items-center justify-center p-6 pt-20 pb-20">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="bg-primary/5 absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-[120px]"></div>
         </div>
 
-        <div className="w-full max-w-md bg-surface-container-high p-8 shadow-2xl relative z-10 rounded-xl minimal-border">
+        <div className="bg-surface-container-high minimal-border relative z-10 w-full max-w-md rounded-xl p-8 shadow-2xl">
           <div className="mb-10 text-center">
-            <div className="flex justify-center mb-6">
-              <div className="p-3 bg-surface-container-highest rounded-lg">
+            <div className="mb-6 flex justify-center">
+              <div className="bg-surface-container-highest rounded-lg p-3">
                 <span className="material-symbols-outlined text-primary text-4xl">
                   terminal
                 </span>
               </div>
             </div>
-            <h1 className="font-headline text-3xl font-bold tracking-tight text-on-surface mb-2">
+            <h1 className="font-headline text-on-surface mb-2 text-3xl font-bold tracking-tight">
               Terminal Access
             </h1>
             <p className="text-primary-fixed-dim text-sm font-medium tracking-wide uppercase opacity-70">
@@ -68,26 +66,26 @@ export function LoginPage() {
           {/* Google Sign-in (only for sign-in mode) */}
           <div className="space-y-4">
             <Button
-              className="w-full flex items-center justify-center gap-3 bg-surface-container-highest py-3 px-4 hover:bg-surface-bright group relative rounded"
+              className="bg-surface-container-highest hover:bg-surface-bright group relative flex w-full items-center justify-center gap-3 rounded px-4 py-3"
               onClick={handleGoogleSignIn}
             >
-              <div className="absolute inset-0 border border-primary/10 pointer-events-none group-hover:border-primary/30 transition-colors rounded"></div>
+              <div className="border-primary/10 group-hover:border-primary/30 pointer-events-none absolute inset-0 rounded border transition-colors"></div>
               <GoogleIcon />
-              <span className="font-medium text-on-surface text-sm">
+              <span className="text-on-surface text-sm font-medium">
                 Sign in with Google
               </span>
             </Button>
 
             <div className="flex items-center gap-4 py-2">
-              <div className="h-[1px] flex-grow bg-outline-variant/20"></div>
-              <span className="text-[10px] uppercase tracking-widest text-outline">
+              <div className="bg-outline-variant/20 h-[1px] flex-grow"></div>
+              <span className="text-outline text-[10px] tracking-widest uppercase">
                 Secondary Access
               </span>
-              <div className="h-[1px] flex-grow bg-outline-variant/20"></div>
+              <div className="bg-outline-variant/20 h-[1px] flex-grow"></div>
             </div>
 
             <Button
-              className="w-full bg-surface-container-highest text-on-surface/70 hover:text-primary font-headline font-semibold uppercase tracking-[0.2em] py-3 hover:bg-surface-bright active:scale-[0.95] rounded border border-primary/5 hover:border-primary/20 transition-all duration-300 text-[10px]"
+              className="bg-surface-container-highest text-on-surface/70 hover:text-primary font-headline hover:bg-surface-bright border-primary/5 hover:border-primary/20 w-full rounded border py-3 text-[10px] font-semibold tracking-[0.2em] uppercase transition-all duration-300 active:scale-[0.95]"
               onClick={() => router.push("/workspace")}
             >
               Bypass Protocol
@@ -96,7 +94,7 @@ export function LoginPage() {
 
           <div className="mt-8 text-center">
             <a
-              className="text-[10px] uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors"
+              className="text-on-surface-variant hover:text-primary text-[10px] tracking-widest uppercase transition-colors"
               href="#"
             >
               Request Access Upgrade
@@ -105,25 +103,25 @@ export function LoginPage() {
         </div>
       </main>
 
-      <footer className="bg-surface fixed bottom-0 w-full flex flex-col md:flex-row justify-between items-center px-12 py-8 gap-4 z-40 border-t border-white/5">
-        <div className="font-body text-[10px] tracking-[0.2em] uppercase text-primary">
+      <footer className="bg-surface fixed bottom-0 z-40 flex w-full flex-col items-center justify-between gap-4 border-t border-white/5 px-12 py-8 md:flex-row">
+        <div className="font-body text-primary text-[10px] tracking-[0.2em] uppercase">
           © 2024 AAPAS KINETIC SYSTEMS. ALL RIGHTS RESERVED.
         </div>
         <div className="flex gap-8">
           <a
-            className="font-body text-[10px] tracking-[0.2em] uppercase text-on-surface/30 hover:text-primary transition-opacity"
+            className="font-body text-on-surface/30 hover:text-primary text-[10px] tracking-[0.2em] uppercase transition-opacity"
             href="#"
           >
             Security Protocol
           </a>
           <a
-            className="font-body text-[10px] tracking-[0.2em] uppercase text-on-surface/30 hover:text-primary transition-opacity"
+            className="font-body text-on-surface/30 hover:text-primary text-[10px] tracking-[0.2em] uppercase transition-opacity"
             href="#"
           >
             Privacy Policy
           </a>
           <a
-            className="font-body text-[10px] tracking-[0.2em] uppercase text-on-surface/30 hover:text-primary transition-opacity"
+            className="font-body text-on-surface/30 hover:text-primary text-[10px] tracking-[0.2em] uppercase transition-opacity"
             href="#"
           >
             Terminal Status

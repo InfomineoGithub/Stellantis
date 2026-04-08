@@ -1,10 +1,10 @@
 """Memory API router for retrieving and managing global memory data."""
 
 
-from app.gateway.dependencies import get_current_user
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.gateway.dependencies import get_current_user
 from deerflow.agents.memory.updater import (
     clear_memory_data,
     create_memory_fact,

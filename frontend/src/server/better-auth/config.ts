@@ -22,9 +22,7 @@ export const auth = betterAuth({
       clientSecret: env.BETTER_AUTH_GOOGLE_CLIENT_SECRET ?? "",
     },
   },
-  plugins: [
-    jwt()
-  ]
+  plugins: [jwt()],
 });
 
 export type Session = typeof auth.$Infer.Session;
