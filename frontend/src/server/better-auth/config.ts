@@ -8,6 +8,11 @@ export const auth = betterAuth({
   database: new Pool({
     connectionString: env.DATABASE_URL ?? "",
   }),
+  baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:2026",
+  trustedOrigins: [
+    process.env.BETTER_AUTH_URL ?? "http://localhost:2026",
+    "http://localhost:3000",
+  ],
   emailAndPassword: {
     enabled: false,
   },
