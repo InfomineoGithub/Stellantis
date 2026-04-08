@@ -5,8 +5,6 @@ from .paths import Paths, get_paths
 from .skills_config import SkillsConfig
 from .tracing_config import get_tracing_config, is_tracing_enabled
 
-# done
-
 __all__ = [
     "get_app_config",
     "Paths",

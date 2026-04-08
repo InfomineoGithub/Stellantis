@@ -1,7 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-# done
-
 
 class ModelConfig(BaseModel):
     """Config section for a model"""

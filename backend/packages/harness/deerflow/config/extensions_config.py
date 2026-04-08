@@ -7,8 +7,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# done
-
 
 class McpOAuthConfig(BaseModel):
     """OAuth configuration for an MCP server (HTTP/SSE transports)."""

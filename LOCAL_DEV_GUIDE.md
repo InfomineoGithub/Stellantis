@@ -19,6 +19,7 @@
    - [Generate config files](#41-generate-config-files)
    - [Configure an LLM model](#42-configure-an-llm-model)
    - [Set API keys](#43-set-api-keys)
+   - [Database Schema (Better Auth)](#44-database-schema-better-auth)
 5. [Install All Dependencies](#5-install-all-dependencies)
 6. [Running the Full Stack Locally (Fast Dev Mode)](#6-running-the-full-stack-locally-fast-dev-mode)
    - [Option A — One command (all services)](#option-a--one-command-all-services-easiest)
@@ -233,6 +234,29 @@ JINA_API_KEY=jina_...
 ```
 
 > All keys prefixed with `$` in `config.yaml` are automatically read from this `.env` file at startup.
+
+---
+
+### 4.4 Database Schema (Better Auth)
+
+**Why:** Better Auth requires specific tables in your database to manage users and sessions. You need to generate the schema and migrate your database before running the app.
+
+From the `frontend/` directory, run:
+
+#### Generate the Schema
+Use this to preview the SQL required for your database:
+```powershell
+cd frontend
+npx better-auth generate --config ./src/server/better-auth/config.ts
+```
+
+#### Migrate the Database
+Use this to apply the schema changes to your database:
+```powershell
+npx better-auth migrate --config ./src/server/better-auth/config.ts
+```
+
+> **Note:** Ensure your `DATABASE_URL` is correctly set in `frontend/.env` before running these commands.
 
 ---
 

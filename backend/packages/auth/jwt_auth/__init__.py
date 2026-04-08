@@ -1,3 +1,3 @@
-from .verifier import verify_jwt, AuthError
+from .verifier import AuthError, verify_jwt
 
 __all__ = ["verify_jwt", "AuthError"]

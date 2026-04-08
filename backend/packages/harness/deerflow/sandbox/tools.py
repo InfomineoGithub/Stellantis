@@ -174,10 +174,7 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
         if absolute_path == VIRTUAL_PATH_PREFIX or absolute_path.startswith(f"{VIRTUAL_PATH_PREFIX}/"):
             continue
 
-        if any(
-            absolute_path == prefix.rstrip("/") or absolute_path.startswith(prefix)
-            for prefix in _LOCAL_BASH_SYSTEM_PATH_PREFIXES
-        ):
+        if any(absolute_path == prefix.rstrip("/") or absolute_path.startswith(prefix) for prefix in _LOCAL_BASH_SYSTEM_PATH_PREFIXES):
             continue
 
         unsafe_paths.append(absolute_path)

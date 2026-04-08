@@ -4,8 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-# done
-
 CheckpointerType = Literal["memory", "sqlite", "postgres"]
 
 

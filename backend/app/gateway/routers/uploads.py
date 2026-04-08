@@ -4,10 +4,9 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-
-from app.gateway.dependencies import get_current_user
 from pydantic import BaseModel
 
+from app.gateway.dependencies import get_current_user
 from deerflow.config.paths import VIRTUAL_PATH_PREFIX, get_paths
 from deerflow.sandbox.sandbox_provider import get_sandbox_provider
 from deerflow.utils.file_conversion import CONVERTIBLE_EXTENSIONS, convert_file_to_markdown

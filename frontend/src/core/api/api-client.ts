@@ -4,9 +4,9 @@ import { Client as LangGraphClient } from "@langchain/langgraph-sdk/client";
 
 import { getLangGraphBaseURL } from "../config";
 
+import { getAuthHeaders, clearJwtTokenCache } from "./auth-fetch";
 import { sanitizeRunStreamOptions } from "./stream-mode";
 
-import { getAuthHeaders, clearJwtTokenCache } from "./auth-fetch";
 
 function createCompatibleClient(isMock?: boolean): LangGraphClient {
   const client = new LangGraphClient({

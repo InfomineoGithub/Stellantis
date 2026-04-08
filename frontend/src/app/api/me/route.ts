@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+
 import { auth } from "@/server/better-auth/config";
 
 export async function GET(request: Request) {
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({ session });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }

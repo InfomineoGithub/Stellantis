@@ -4,8 +4,6 @@ from .setup_agent_tool import setup_agent
 from .task_tool import task_tool
 from .view_image_tool import view_image_tool
 
-# done
-
 __all__ = [
     "setup_agent",
     "present_file_tool",

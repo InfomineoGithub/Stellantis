@@ -59,8 +59,8 @@ def test_resolve_local_tool_path_rejects_virtual_root_with_clear_message() -> No
 
     with pytest.raises(PermissionError, match="Only paths under"):
         resolve_local_tool_path(VIRTUAL_PATH_PREFIX, thread_data)
-        
-        
+
+
 def test_resolve_local_tool_path_returns_host_path_for_valid_virtual_path() -> None:
     base = Path("/tmp/deer-flow/threads/t1/user-data")
     thread_data = {
