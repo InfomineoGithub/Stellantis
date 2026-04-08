@@ -21,6 +21,7 @@ dependencies = [
     "asyncpg>=0.30",
     "alembic>=1.14",
     "greenlet>=3.0",
+    "wecom-aibot-python-sdk>=0.1.6",
 ]
 
 [dependency-groups]

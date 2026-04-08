@@ -19,28 +19,38 @@ import asyncio
 import json
 import logging
 import mimetypes
-import os
-import re
 import shutil
 import tempfile
 import uuid
-import zipfile
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 
 from deerflow.agents.lead_agent.agent import _build_middlewares
 from deerflow.agents.lead_agent.prompt import apply_prompt_template
 from deerflow.agents.thread_state import ThreadState
+from deerflow.config.agents_config import AGENT_NAME_PATTERN
 from deerflow.config.app_config import get_app_config, reload_app_config
 from deerflow.config.extensions_config import ExtensionsConfig, SkillStateConfig, get_extensions_config, reload_extensions_config
 from deerflow.config.paths import get_paths
 from deerflow.models import create_chat_model
+from deerflow.skills.installer import install_skill_from_archive
+from deerflow.uploads.manager import (
+    claim_unique_filename,
+    delete_file_safe,
+    enrich_file_listing,
+    ensure_uploads_dir,
+    get_uploads_dir,
+    list_files_in_dir,
+    upload_artifact_url,
+    upload_virtual_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +116,9 @@ class DeerFlowClient:
         thinking_enabled: bool = True,
         subagent_enabled: bool = False,
         plan_mode: bool = False,
+        agent_name: str | None = None,
+        available_skills: set[str] | None = None,
+        middlewares: Sequence[AgentMiddleware] | None = None,
     ):
         """Initialize the client.
 
@@ -120,16 +133,25 @@ class DeerFlowClient:
             thinking_enabled: Enable model's extended thinking.
             subagent_enabled: Enable subagent delegation.
             plan_mode: Enable TodoList middleware for plan mode.
+            agent_name: Name of the agent to use.
+            available_skills: Optional set of skill names to make available. If None (default), all scanned skills are available.
+            middlewares: Optional list of custom middlewares to inject into the agent.
         """
         if config_path is not None:
             reload_app_config(config_path)
         self._app_config = get_app_config()
+
+        if agent_name is not None and not AGENT_NAME_PATTERN.match(agent_name):
+            raise ValueError(f"Invalid agent name '{agent_name}'. Must match pattern: {AGENT_NAME_PATTERN.pattern}")
 
         self._checkpointer = checkpointer
         self._model_name = model_name
         self._thinking_enabled = thinking_enabled
         self._subagent_enabled = subagent_enabled
         self._plan_mode = plan_mode
+        self._agent_name = agent_name
+        self._available_skills = set(available_skills) if available_skills is not None else None
+        self._middlewares = list(middlewares) if middlewares else []
 
         # Lazy agent — created on first call, recreated when config changes.
         self._agent = None
@@ -189,6 +211,8 @@ class DeerFlowClient:
             cfg.get("thinking_enabled"),
             cfg.get("is_plan_mode"),
             cfg.get("subagent_enabled"),
+            self._agent_name,
+            frozenset(self._available_skills) if self._available_skills is not None else None,
         )
 
         if self._agent is not None and self._agent_config_key == key:
@@ -202,10 +226,12 @@ class DeerFlowClient:
         kwargs: dict[str, Any] = {
             "model": create_chat_model(name=model_name, thinking_enabled=thinking_enabled),
             "tools": self._get_tools(model_name=model_name, subagent_enabled=subagent_enabled),
-            "middleware": _build_middlewares(config, model_name=model_name),
+            "middleware": _build_middlewares(config, model_name=model_name, agent_name=self._agent_name, custom_middlewares=self._middlewares),
             "system_prompt": apply_prompt_template(
                 subagent_enabled=subagent_enabled,
                 max_concurrent_subagents=max_concurrent_subagents,
+                agent_name=self._agent_name,
+                available_skills=self._available_skills,
             ),
             "state_schema": ThreadState,
         }
@@ -219,7 +245,7 @@ class DeerFlowClient:
 
         self._agent = create_agent(**kwargs)
         self._agent_config_key = key
-        logger.info("Agent created: model=%s, thinking=%s", model_name, thinking_enabled)
+        logger.info("Agent created: agent_name=%s, model=%s, thinking=%s", self._agent_name, model_name, thinking_enabled)
 
     @staticmethod
     def _get_tools(*, model_name: str | None, subagent_enabled: bool):
@@ -235,11 +261,13 @@ class DeerFlowClient:
             d: dict[str, Any] = {"type": "ai", "content": msg.content, "id": getattr(msg, "id", None)}
             if msg.tool_calls:
                 d["tool_calls"] = [{"name": tc["name"], "args": tc["args"], "id": tc.get("id")} for tc in msg.tool_calls]
+            if getattr(msg, "usage_metadata", None):
+                d["usage_metadata"] = msg.usage_metadata
             return d
         if isinstance(msg, ToolMessage):
             return {
                 "type": "tool",
-                "content": msg.content if isinstance(msg.content, str) else str(msg.content),
+                "content": DeerFlowClient._extract_text(msg.content),
                 "name": getattr(msg, "name", None),
                 "tool_call_id": getattr(msg, "tool_call_id", None),
                 "id": getattr(msg, "id", None),
@@ -252,17 +280,39 @@ class DeerFlowClient:
 
     @staticmethod
     def _extract_text(content) -> str:
-        """Extract plain text from AIMessage content (str or list of blocks)."""
+        """Extract plain text from AIMessage content (str or list of blocks).
+
+        String chunks are concatenated without separators to avoid corrupting
+        token/character deltas or chunked JSON payloads. Dict-based text blocks
+        are treated as full text blocks and joined with newlines to preserve
+        readability.
+        """
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            parts = []
+            if content and all(isinstance(block, str) for block in content):
+                chunk_like = len(content) > 1 and all(isinstance(block, str) and len(block) <= 20 and any(ch in block for ch in '{}[]":,') for block in content)
+                return "".join(content) if chunk_like else "\n".join(content)
+
+            pieces: list[str] = []
+            pending_str_parts: list[str] = []
+
+            def flush_pending_str_parts() -> None:
+                if pending_str_parts:
+                    pieces.append("".join(pending_str_parts))
+                    pending_str_parts.clear()
+
             for block in content:
                 if isinstance(block, str):
-                    parts.append(block)
-                elif isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(block["text"])
-            return "\n".join(parts) if parts else ""
+                    pending_str_parts.append(block)
+                elif isinstance(block, dict):
+                    flush_pending_str_parts()
+                    text_val = block.get("text")
+                    if isinstance(text_val, str):
+                        pieces.append(text_val)
+
+            flush_pending_str_parts()
+            return "\n".join(pieces) if pieces else ""
         return str(content)
 
     # ------------------------------------------------------------------
@@ -295,10 +345,12 @@ class DeerFlowClient:
         Yields:
             StreamEvent with one of:
             - type="values"          data={"title": str|None, "messages": [...], "artifacts": [...]}
+            - type="custom"          data={...}
             - type="messages-tuple"  data={"type": "ai", "content": str, "id": str}
+            - type="messages-tuple"  data={"type": "ai", "content": str, "id": str, "usage_metadata": {...}}
             - type="messages-tuple"  data={"type": "ai", "content": "", "id": str, "tool_calls": [...]}
             - type="messages-tuple"  data={"type": "tool", "content": str, "name": str, "tool_call_id": str, "id": str}
-            - type="end"             data={}
+            - type="end"             data={"usage": {"input_tokens": int, "output_tokens": int, "total_tokens": int}}
         """
         if thread_id is None:
             thread_id = str(uuid.uuid4())
@@ -308,10 +360,28 @@ class DeerFlowClient:
 
         state: dict[str, Any] = {"messages": [HumanMessage(content=message)]}
         context = {"thread_id": thread_id}
+        if self._agent_name:
+            context["agent_name"] = self._agent_name
 
         seen_ids: set[str] = set()
+        cumulative_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
-        for chunk in self._agent.stream(state, config=config, context=context, stream_mode="values"):
+        for item in self._agent.stream(
+            state,
+            config=config,
+            context=context,
+            stream_mode=["values", "custom"],
+        ):
+            if isinstance(item, tuple) and len(item) == 2:
+                mode, chunk = item
+                mode = str(mode)
+            else:
+                mode, chunk = "values", item
+
+            if mode == "custom":
+                yield StreamEvent(type="custom", data=chunk)
+                continue
+
             messages = chunk.get("messages", [])
 
             for msg in messages:
@@ -322,6 +392,13 @@ class DeerFlowClient:
                     seen_ids.add(msg_id)
 
                 if isinstance(msg, AIMessage):
+                    # Track token usage from AI messages
+                    usage = getattr(msg, "usage_metadata", None)
+                    if usage:
+                        cumulative_usage["input_tokens"] += usage.get("input_tokens", 0) or 0
+                        cumulative_usage["output_tokens"] += usage.get("output_tokens", 0) or 0
+                        cumulative_usage["total_tokens"] += usage.get("total_tokens", 0) or 0
+
                     if msg.tool_calls:
                         yield StreamEvent(
                             type="messages-tuple",
@@ -335,17 +412,21 @@ class DeerFlowClient:
 
                     text = self._extract_text(msg.content)
                     if text:
-                        yield StreamEvent(
-                            type="messages-tuple",
-                            data={"type": "ai", "content": text, "id": msg_id},
-                        )
+                        event_data: dict[str, Any] = {"type": "ai", "content": text, "id": msg_id}
+                        if usage:
+                            event_data["usage_metadata"] = {
+                                "input_tokens": usage.get("input_tokens", 0) or 0,
+                                "output_tokens": usage.get("output_tokens", 0) or 0,
+                                "total_tokens": usage.get("total_tokens", 0) or 0,
+                            }
+                        yield StreamEvent(type="messages-tuple", data=event_data)
 
                 elif isinstance(msg, ToolMessage):
                     yield StreamEvent(
                         type="messages-tuple",
                         data={
                             "type": "tool",
-                            "content": msg.content if isinstance(msg.content, str) else str(msg.content),
+                            "content": self._extract_text(msg.content),
                             "name": getattr(msg, "name", None),
                             "tool_call_id": getattr(msg, "tool_call_id", None),
                             "id": msg_id,
@@ -362,7 +443,7 @@ class DeerFlowClient:
                 },
             )
 
-        yield StreamEvent(type="end", data={})
+        yield StreamEvent(type="end", data={"usage": cumulative_usage})
 
     def chat(self, message: str, *, thread_id: str | None = None, **kwargs) -> str:
         """Send a message and return the final text response.
@@ -403,6 +484,7 @@ class DeerFlowClient:
             "models": [
                 {
                     "name": model.name,
+                    "model": getattr(model, "model", None),
                     "display_name": getattr(model, "display_name", None),
                     "description": getattr(model, "description", None),
                     "supports_thinking": getattr(model, "supports_thinking", False),
@@ -447,6 +529,18 @@ class DeerFlowClient:
 
         return get_memory_data()
 
+    def export_memory(self) -> dict:
+        """Export current memory data for backup or transfer."""
+        from deerflow.agents.memory.updater import get_memory_data
+
+        return get_memory_data()
+
+    def import_memory(self, memory_data: dict) -> dict:
+        """Import and persist full memory data."""
+        from deerflow.agents.memory.updater import import_memory_data
+
+        return import_memory_data(memory_data)
+
     def get_model(self, name: str) -> dict | None:
         """Get a specific model's configuration by name.
 
@@ -462,6 +556,7 @@ class DeerFlowClient:
             return None
         return {
             "name": model.name,
+            "model": getattr(model, "model", None),
             "display_name": getattr(model, "display_name", None),
             "description": getattr(model, "description", None),
             "supports_thinking": getattr(model, "supports_thinking", False),
@@ -512,6 +607,7 @@ class DeerFlowClient:
         self._atomic_write_json(config_path, config_data)
 
         self._agent = None
+        self._agent_config_key = None
         reloaded = reload_extensions_config()
         return {"mcp_servers": {name: server.model_dump() for name, server in reloaded.mcp_servers.items()}}
 
@@ -577,6 +673,7 @@ class DeerFlowClient:
         self._atomic_write_json(config_path, config_data)
 
         self._agent = None
+        self._agent_config_key = None
         reload_extensions_config()
 
         updated = next((s for s in load_skills(enabled_only=False) if s.name == name), None)
@@ -603,56 +700,7 @@ class DeerFlowClient:
             FileNotFoundError: If the file does not exist.
             ValueError: If the file is invalid.
         """
-        from deerflow.skills.loader import get_skills_root_path
-        from deerflow.skills.validation import _validate_skill_frontmatter
-
-        path = Path(skill_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Skill file not found: {skill_path}")
-        if not path.is_file():
-            raise ValueError(f"Path is not a file: {skill_path}")
-        if path.suffix != ".skill":
-            raise ValueError("File must have .skill extension")
-        if not zipfile.is_zipfile(path):
-            raise ValueError("File is not a valid ZIP archive")
-
-        skills_root = get_skills_root_path()
-        custom_dir = skills_root / "custom"
-        custom_dir.mkdir(parents=True, exist_ok=True)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            with zipfile.ZipFile(path, "r") as zf:
-                total_size = sum(info.file_size for info in zf.infolist())
-                if total_size > 100 * 1024 * 1024:
-                    raise ValueError("Skill archive too large when extracted (>100MB)")
-                for info in zf.infolist():
-                    if Path(info.filename).is_absolute() or ".." in Path(info.filename).parts:
-                        raise ValueError(f"Unsafe path in archive: {info.filename}")
-                zf.extractall(tmp_path)
-            for p in tmp_path.rglob("*"):
-                if p.is_symlink():
-                    p.unlink()
-
-            items = list(tmp_path.iterdir())
-            if not items:
-                raise ValueError("Skill archive is empty")
-
-            skill_dir = items[0] if len(items) == 1 and items[0].is_dir() else tmp_path
-
-            is_valid, message, skill_name = _validate_skill_frontmatter(skill_dir)
-            if not is_valid:
-                raise ValueError(f"Invalid skill: {message}")
-            if not re.fullmatch(r"[a-zA-Z0-9_-]+", skill_name):
-                raise ValueError(f"Invalid skill name: {skill_name}")
-
-            target = custom_dir / skill_name
-            if target.exists():
-                raise ValueError(f"Skill '{skill_name}' already exists")
-
-            shutil.copytree(skill_dir, target)
-
-        return {"success": True, "skill_name": skill_name, "message": f"Skill '{skill_name}' installed successfully"}
+        return install_skill_from_archive(skill_path)
 
     # ------------------------------------------------------------------
     # Public API — memory management
@@ -667,6 +715,41 @@ class DeerFlowClient:
         from deerflow.agents.memory.updater import reload_memory_data
 
         return reload_memory_data()
+
+    def clear_memory(self) -> dict:
+        """Clear all persisted memory data."""
+        from deerflow.agents.memory.updater import clear_memory_data
+
+        return clear_memory_data()
+
+    def create_memory_fact(self, content: str, category: str = "context", confidence: float = 0.5) -> dict:
+        """Create a single fact manually."""
+        from deerflow.agents.memory.updater import create_memory_fact
+
+        return create_memory_fact(content=content, category=category, confidence=confidence)
+
+    def delete_memory_fact(self, fact_id: str) -> dict:
+        """Delete a single fact from memory by fact id."""
+        from deerflow.agents.memory.updater import delete_memory_fact
+
+        return delete_memory_fact(fact_id)
+
+    def update_memory_fact(
+        self,
+        fact_id: str,
+        content: str | None = None,
+        category: str | None = None,
+        confidence: float | None = None,
+    ) -> dict:
+        """Update a single fact manually, preserving omitted fields."""
+        from deerflow.agents.memory.updater import update_memory_fact
+
+        return update_memory_fact(
+            fact_id=fact_id,
+            content=content,
+            category=category,
+            confidence=confidence,
+        )
 
     def get_memory_config(self) -> dict:
         """Get memory system configuration.
@@ -702,13 +785,6 @@ class DeerFlowClient:
     # Public API — file uploads
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _get_uploads_dir(thread_id: str) -> Path:
-        """Get (and create) the uploads directory for a thread."""
-        base = get_paths().sandbox_uploads_dir(thread_id)
-        base.mkdir(parents=True, exist_ok=True)
-        return base
-
     def upload_files(self, thread_id: str, files: list[str | Path]) -> dict:
         """Upload local files into a thread's uploads directory.
 
@@ -730,7 +806,7 @@ class DeerFlowClient:
 
         # Validate all files upfront to avoid partial uploads.
         resolved_files = []
-        convertible_extensions = {ext.lower() for ext in CONVERTIBLE_EXTENSIONS}
+        seen_names: set[str] = set()
         has_convertible_file = False
         for f in files:
             p = Path(f)
@@ -738,11 +814,12 @@ class DeerFlowClient:
                 raise FileNotFoundError(f"File not found: {f}")
             if not p.is_file():
                 raise ValueError(f"Path is not a file: {f}")
-            resolved_files.append(p)
-            if not has_convertible_file and p.suffix.lower() in convertible_extensions:
+            dest_name = claim_unique_filename(p.name, seen_names)
+            resolved_files.append((p, dest_name))
+            if not has_convertible_file and p.suffix.lower() in CONVERTIBLE_EXTENSIONS:
                 has_convertible_file = True
 
-        uploads_dir = self._get_uploads_dir(thread_id)
+        uploads_dir = ensure_uploads_dir(thread_id)
         uploaded_files: list[dict] = []
 
         conversion_pool = None
@@ -762,19 +839,21 @@ class DeerFlowClient:
             return asyncio.run(convert_file_to_markdown(path))
 
         try:
-            for src_path in resolved_files:
-                dest = uploads_dir / src_path.name
+            for src_path, dest_name in resolved_files:
+                dest = uploads_dir / dest_name
                 shutil.copy2(src_path, dest)
 
                 info: dict[str, Any] = {
-                    "filename": src_path.name,
+                    "filename": dest_name,
                     "size": str(dest.stat().st_size),
                     "path": str(dest),
-                    "virtual_path": f"/mnt/user-data/uploads/{src_path.name}",
-                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{src_path.name}",
+                    "virtual_path": upload_virtual_path(dest_name),
+                    "artifact_url": upload_artifact_url(thread_id, dest_name),
                 }
+                if dest_name != src_path.name:
+                    info["original_filename"] = src_path.name
 
-                if src_path.suffix.lower() in convertible_extensions:
+                if src_path.suffix.lower() in CONVERTIBLE_EXTENSIONS:
                     try:
                         if conversion_pool is not None:
                             md_path = conversion_pool.submit(_convert_in_thread, dest).result()
@@ -790,8 +869,9 @@ class DeerFlowClient:
 
                     if md_path is not None:
                         info["markdown_file"] = md_path.name
-                        info["markdown_virtual_path"] = f"/mnt/user-data/uploads/{md_path.name}"
-                        info["markdown_artifact_url"] = f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{md_path.name}"
+                        info["markdown_path"] = str(uploads_dir / md_path.name)
+                        info["markdown_virtual_path"] = upload_virtual_path(md_path.name)
+                        info["markdown_artifact_url"] = upload_artifact_url(thread_id, md_path.name)
 
                 uploaded_files.append(info)
         finally:
@@ -814,29 +894,9 @@ class DeerFlowClient:
             Dict with "files" and "count" keys, matching the Gateway API
             ``list_uploaded_files`` response.
         """
-        uploads_dir = self._get_uploads_dir(thread_id)
-        if not uploads_dir.exists():
-            return {"files": [], "count": 0}
-
-        files = []
-        with os.scandir(uploads_dir) as entries:
-            file_entries = [entry for entry in entries if entry.is_file()]
-
-        for entry in sorted(file_entries, key=lambda item: item.name):
-            stat = entry.stat()
-            filename = entry.name
-            files.append(
-                {
-                    "filename": filename,
-                    "size": str(stat.st_size),
-                    "path": str(Path(entry.path)),
-                    "virtual_path": f"/mnt/user-data/uploads/{filename}",
-                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{filename}",
-                    "extension": Path(filename).suffix,
-                    "modified": stat.st_mtime,
-                }
-            )
-        return {"files": files, "count": len(files)}
+        uploads_dir = get_uploads_dir(thread_id)
+        result = list_files_in_dir(uploads_dir)
+        return enrich_file_listing(result, thread_id)
 
     def delete_upload(self, thread_id: str, filename: str) -> dict:
         """Delete a file from a thread's uploads directory.
@@ -853,19 +913,10 @@ class DeerFlowClient:
             FileNotFoundError: If the file does not exist.
             PermissionError: If path traversal is detected.
         """
-        uploads_dir = self._get_uploads_dir(thread_id)
-        file_path = (uploads_dir / filename).resolve()
+        from deerflow.utils.file_conversion import CONVERTIBLE_EXTENSIONS
 
-        try:
-            file_path.relative_to(uploads_dir.resolve())
-        except ValueError as exc:
-            raise PermissionError("Access denied: path traversal detected") from exc
-
-        if not file_path.is_file():
-            raise FileNotFoundError(f"File not found: {filename}")
-
-        file_path.unlink()
-        return {"success": True, "message": f"Deleted {filename}"}
+        uploads_dir = get_uploads_dir(thread_id)
+        return delete_file_safe(uploads_dir, filename, convertible_extensions=CONVERTIBLE_EXTENSIONS)
 
     # ------------------------------------------------------------------
     # Public API — artifacts
@@ -885,19 +936,14 @@ class DeerFlowClient:
             FileNotFoundError: If the artifact does not exist.
             ValueError: If the path is invalid.
         """
-        virtual_prefix = "mnt/user-data"
-        clean_path = path.lstrip("/")
-        if not clean_path.startswith(virtual_prefix):
-            raise ValueError(f"Path must start with /{virtual_prefix}")
-
-        relative = clean_path[len(virtual_prefix) :].lstrip("/")
-        base_dir = get_paths().sandbox_user_data_dir(thread_id)
-        actual = (base_dir / relative).resolve()
-
         try:
-            actual.relative_to(base_dir.resolve())
+            actual = get_paths().resolve_virtual_path(thread_id, path)
         except ValueError as exc:
-            raise PermissionError("Access denied: path traversal detected") from exc
+            if "traversal" in str(exc):
+                from deerflow.uploads.manager import PathTraversalError
+
+                raise PathTraversalError("Path traversal detected") from exc
+            raise
         if not actual.exists():
             raise FileNotFoundError(f"Artifact not found: {path}")
         if not actual.is_file():

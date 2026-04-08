@@ -27,7 +27,7 @@ from langgraph.types import Checkpointer
 
 from deerflow.config.app_config import get_app_config
 from deerflow.config.checkpointer_config import CheckpointerConfig
-from deerflow.config.paths import resolve_path
+from deerflow.runtime.store._sqlite_utils import resolve_sqlite_conn_str
 
 logger = logging.getLogger(__name__)
 
@@ -42,18 +42,6 @@ POSTGRES_CONN_REQUIRED = "checkpointer.connection_string is required for the pos
 # ---------------------------------------------------------------------------
 # Sync factory
 # ---------------------------------------------------------------------------
-
-
-def _resolve_sqlite_conn_str(raw: str) -> str:
-    """Return a SQLite connection string ready for use with ``SqliteSaver``.
-
-    SQLite special strings (``":memory:"`` and ``file:`` URIs) are returned
-    unchanged.  Plain filesystem paths — relative or absolute — are resolved
-    to an absolute string via :func:`resolve_path`.
-    """
-    if raw == ":memory:" or raw.startswith("file:"):
-        return raw
-    return str(resolve_path(raw))
 
 
 @contextlib.contextmanager
@@ -78,7 +66,7 @@ def _sync_checkpointer_cm(config: CheckpointerConfig) -> Iterator[Checkpointer]:
         except ImportError as exc:
             raise ImportError(SQLITE_INSTALL) from exc
 
-        conn_str = _resolve_sqlite_conn_str(config.connection_string or "store.db")
+        conn_str = resolve_sqlite_conn_str(config.connection_string or "store.db")
         with SqliteSaver.from_conn_string(conn_str) as saver:
             saver.setup()
             logger.info("Checkpointer: using SqliteSaver (%s)", conn_str)
@@ -131,17 +119,19 @@ def get_checkpointer() -> Checkpointer:
     from deerflow.config.app_config import _app_config
     from deerflow.config.checkpointer_config import get_checkpointer_config
 
-    if _app_config is None:
-        # Only load config if it hasn't been initialized yet
-        # In tests, config may be set directly via set_checkpointer_config()
+    config = get_checkpointer_config()
+
+    if config is None and _app_config is None:
+        # Only load app config lazily when neither the app config nor an explicit
+        # checkpointer config has been initialized yet. This keeps tests that
+        # intentionally set the global checkpointer config isolated from any
+        # ambient config.yaml on disk.
         try:
             get_app_config()
         except FileNotFoundError:
-            # In test environments without config.yaml, this is expected
-            # Tests will set config directly via set_checkpointer_config()
+            # In test environments without config.yaml, this is expected.
             pass
-
-    config = get_checkpointer_config()
+        config = get_checkpointer_config()
     if config is None:
         from langgraph.checkpoint.memory import InMemorySaver
 

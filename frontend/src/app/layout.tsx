@@ -28,6 +28,7 @@ const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
 });
 
+
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -39,7 +40,6 @@ export default async function RootLayout({
       suppressContentEditableWarning
       suppressHydrationWarning
     >
-      <head />
       <body>
 
         <ThemeProvider attribute="class" enableSystem disableTransitionOnChange>

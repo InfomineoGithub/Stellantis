@@ -46,15 +46,15 @@ function createCompatibleClient(isMock?: boolean): LangGraphClient {
   return client;
 }
 
-// Reset singleton when needed (e.g. after sign-out).
-export function resetAPIClient(): void {
-  _singleton = null;
-  // Also clear the cached JWT so the next request fetches a fresh token.
-  clearJwtTokenCache();
-}
-
-let _singleton: LangGraphClient | null = null;
+const _clients = new Map<string, LangGraphClient>();
 export function getAPIClient(isMock?: boolean): LangGraphClient {
-  _singleton ??= createCompatibleClient(isMock);
-  return _singleton;
+  const cacheKey = isMock ? "mock" : "default";
+  let client = _clients.get(cacheKey);
+
+  if (!client) {
+    client = createCompatibleClient(isMock);
+    _clients.set(cacheKey, client);
+  }
+
+  return client;
 }

@@ -2,6 +2,7 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.gateway.dependencies import get_current_user
@@ -69,7 +70,7 @@ def _extract_response_text(content: object) -> str:
         for block in content:
             if isinstance(block, str):
                 parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
+            elif isinstance(block, dict) and block.get("type") in {"text", "output_text"}:
                 text = block.get("text")
                 if isinstance(text, str):
                     parts.append(text)
@@ -107,22 +108,21 @@ async def generate_suggestions(thread_id: str, request: SuggestionsRequest, _use
     if not conversation:
         return SuggestionsResponse(suggestions=[])
 
-    prompt = (
+    system_instruction = (
         "You are generating follow-up questions to help the user continue the conversation.\n"
         f"Based on the conversation below, produce EXACTLY {n} short questions the user might ask next.\n"
         "Requirements:\n"
-        "- Questions must be relevant to the conversation.\n"
+        "- Questions must be relevant to the preceding conversation.\n"
         "- Questions must be written in the same language as the user.\n"
         "- Keep each question concise (ideally <= 20 words / <= 40 Chinese characters).\n"
         "- Do NOT include numbering, markdown, or any extra text.\n"
-        "- Output MUST be a JSON array of strings only.\n\n"
-        "Conversation:\n"
-        f"{conversation}\n"
+        "- Output MUST be a JSON array of strings only.\n"
     )
+    user_content = f"Conversation Context:\n{conversation}\n\nGenerate {n} follow-up questions"
 
     try:
         model = create_chat_model(name=request.model_name, thinking_enabled=False)
-        response = model.invoke(prompt)
+        response = await model.ainvoke([SystemMessage(content=system_instruction), HumanMessage(content=user_content)])
         raw = _extract_response_text(response.content)
         suggestions = _parse_json_string_list(raw) or []
         cleaned = [s.replace("\n", " ").strip() for s in suggestions if s.strip()]

@@ -9,6 +9,7 @@ from deerflow.config.app_config import AppConfig
 from deerflow.config.model_config import ModelConfig
 from deerflow.config.sandbox_config import SandboxConfig
 from deerflow.models import factory as factory_module
+from deerflow.models import openai_codex_provider as codex_provider_module
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,6 +31,7 @@ def _make_model(
     supports_reasoning_effort: bool = False,
     when_thinking_enabled: dict | None = None,
     thinking: dict | None = None,
+    max_tokens: int | None = None,
 ) -> ModelConfig:
     return ModelConfig(
         name=name,
@@ -37,6 +39,7 @@ def _make_model(
         description=None,
         use=use,
         model=name,
+        max_tokens=max_tokens,
         supports_thinking=supports_thinking,
         supports_reasoning_effort=supports_reasoning_effort,
         when_thinking_enabled=when_thinking_enabled,
@@ -70,7 +73,7 @@ def _patch_factory(monkeypatch, app_config: AppConfig, model_class=FakeChatModel
     """Patch get_app_config, resolve_class, and tracing for isolated unit tests."""
     monkeypatch.setattr(factory_module, "get_app_config", lambda: app_config)
     monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: model_class)
-    monkeypatch.setattr(factory_module, "is_tracing_enabled", lambda: False)
+    monkeypatch.setattr(factory_module, "build_tracing_callbacks", lambda: [])
 
 
 # ---------------------------------------------------------------------------
@@ -92,10 +95,21 @@ def test_uses_first_model_when_name_is_none(monkeypatch):
 def test_raises_when_model_not_found(monkeypatch):
     cfg = _make_app_config([_make_model("only-model")])
     monkeypatch.setattr(factory_module, "get_app_config", lambda: cfg)
-    monkeypatch.setattr(factory_module, "is_tracing_enabled", lambda: False)
+    monkeypatch.setattr(factory_module, "build_tracing_callbacks", lambda: [])
 
     with pytest.raises(ValueError, match="ghost-model"):
         factory_module.create_chat_model(name="ghost-model")
+
+
+def test_appends_all_tracing_callbacks(monkeypatch):
+    cfg = _make_app_config([_make_model("alpha")])
+    _patch_factory(monkeypatch, cfg)
+    monkeypatch.setattr(factory_module, "build_tracing_callbacks", lambda: ["smith-callback", "langfuse-callback"])
+
+    FakeChatModel.captured_kwargs = {}
+    model = factory_module.create_chat_model(name="alpha")
+
+    assert model.callbacks == ["smith-callback", "langfuse-callback"]
 
 
 # ---------------------------------------------------------------------------
@@ -498,3 +512,181 @@ def test_openai_compatible_provider_multiple_models(monkeypatch):
     # Create second model
     factory_module.create_chat_model(name="minimax-m2.5-highspeed")
     assert captured.get("model") == "MiniMax-M2.5-highspeed"
+
+
+# ---------------------------------------------------------------------------
+# Codex provider reasoning_effort mapping
+# ---------------------------------------------------------------------------
+
+
+class FakeCodexChatModel(FakeChatModel):
+    pass
+
+
+def test_codex_provider_disables_reasoning_when_thinking_disabled(monkeypatch):
+    cfg = _make_app_config(
+        [
+            _make_model(
+                "codex",
+                use="deerflow.models.openai_codex_provider:CodexChatModel",
+                supports_thinking=True,
+                supports_reasoning_effort=True,
+            )
+        ]
+    )
+    _patch_factory(monkeypatch, cfg, model_class=FakeCodexChatModel)
+    monkeypatch.setattr(codex_provider_module, "CodexChatModel", FakeCodexChatModel)
+
+    FakeChatModel.captured_kwargs = {}
+    factory_module.create_chat_model(name="codex", thinking_enabled=False)
+
+    assert FakeChatModel.captured_kwargs.get("reasoning_effort") == "none"
+
+
+def test_codex_provider_preserves_explicit_reasoning_effort(monkeypatch):
+    cfg = _make_app_config(
+        [
+            _make_model(
+                "codex",
+                use="deerflow.models.openai_codex_provider:CodexChatModel",
+                supports_thinking=True,
+                supports_reasoning_effort=True,
+            )
+        ]
+    )
+    _patch_factory(monkeypatch, cfg, model_class=FakeCodexChatModel)
+    monkeypatch.setattr(codex_provider_module, "CodexChatModel", FakeCodexChatModel)
+
+    FakeChatModel.captured_kwargs = {}
+    factory_module.create_chat_model(name="codex", thinking_enabled=True, reasoning_effort="high")
+
+    assert FakeChatModel.captured_kwargs.get("reasoning_effort") == "high"
+
+
+def test_codex_provider_defaults_reasoning_effort_to_medium(monkeypatch):
+    cfg = _make_app_config(
+        [
+            _make_model(
+                "codex",
+                use="deerflow.models.openai_codex_provider:CodexChatModel",
+                supports_thinking=True,
+                supports_reasoning_effort=True,
+            )
+        ]
+    )
+    _patch_factory(monkeypatch, cfg, model_class=FakeCodexChatModel)
+    monkeypatch.setattr(codex_provider_module, "CodexChatModel", FakeCodexChatModel)
+
+    FakeChatModel.captured_kwargs = {}
+    factory_module.create_chat_model(name="codex", thinking_enabled=True)
+
+    assert FakeChatModel.captured_kwargs.get("reasoning_effort") == "medium"
+
+
+def test_codex_provider_strips_unsupported_max_tokens(monkeypatch):
+    cfg = _make_app_config(
+        [
+            _make_model(
+                "codex",
+                use="deerflow.models.openai_codex_provider:CodexChatModel",
+                supports_thinking=True,
+                supports_reasoning_effort=True,
+                max_tokens=4096,
+            )
+        ]
+    )
+    _patch_factory(monkeypatch, cfg, model_class=FakeCodexChatModel)
+    monkeypatch.setattr(codex_provider_module, "CodexChatModel", FakeCodexChatModel)
+
+    FakeChatModel.captured_kwargs = {}
+    factory_module.create_chat_model(name="codex", thinking_enabled=True)
+
+    assert "max_tokens" not in FakeChatModel.captured_kwargs
+
+
+def test_thinking_disabled_vllm_chat_template_format(monkeypatch):
+    wte = {"extra_body": {"chat_template_kwargs": {"thinking": True}}}
+    model = _make_model(
+        "vllm-qwen",
+        use="deerflow.models.vllm_provider:VllmChatModel",
+        supports_thinking=True,
+        when_thinking_enabled=wte,
+    )
+    model.extra_body = {"top_k": 20}
+    cfg = _make_app_config([model])
+    _patch_factory(monkeypatch, cfg)
+
+    captured: dict = {}
+
+    class CapturingModel(FakeChatModel):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            BaseChatModel.__init__(self, **kwargs)
+
+    monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: CapturingModel)
+
+    factory_module.create_chat_model(name="vllm-qwen", thinking_enabled=False)
+
+    assert captured.get("extra_body") == {"top_k": 20, "chat_template_kwargs": {"thinking": False}}
+    assert captured.get("reasoning_effort") is None
+
+
+def test_thinking_disabled_vllm_enable_thinking_format(monkeypatch):
+    wte = {"extra_body": {"chat_template_kwargs": {"enable_thinking": True}}}
+    model = _make_model(
+        "vllm-qwen-enable",
+        use="deerflow.models.vllm_provider:VllmChatModel",
+        supports_thinking=True,
+        when_thinking_enabled=wte,
+    )
+    model.extra_body = {"top_k": 20}
+    cfg = _make_app_config([model])
+    _patch_factory(monkeypatch, cfg)
+
+    captured: dict = {}
+
+    class CapturingModel(FakeChatModel):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            BaseChatModel.__init__(self, **kwargs)
+
+    monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: CapturingModel)
+
+    factory_module.create_chat_model(name="vllm-qwen-enable", thinking_enabled=False)
+
+    assert captured.get("extra_body") == {
+        "top_k": 20,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    assert captured.get("reasoning_effort") is None
+
+
+def test_openai_responses_api_settings_are_passed_to_chatopenai(monkeypatch):
+    model = ModelConfig(
+        name="gpt-5-responses",
+        display_name="GPT-5 Responses",
+        description=None,
+        use="langchain_openai:ChatOpenAI",
+        model="gpt-5",
+        api_key="test-key",
+        use_responses_api=True,
+        output_version="responses/v1",
+        supports_thinking=False,
+        supports_vision=True,
+    )
+    cfg = _make_app_config([model])
+    _patch_factory(monkeypatch, cfg)
+
+    captured: dict = {}
+
+    class CapturingModel(FakeChatModel):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            BaseChatModel.__init__(self, **kwargs)
+
+    monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: CapturingModel)
+
+    factory_module.create_chat_model(name="gpt-5-responses")
+
+    assert captured.get("use_responses_api") is True
+    assert captured.get("output_version") == "responses/v1"

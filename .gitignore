@@ -1,5 +1,7 @@
 # DeerFlow docker image cache
 docker/.cache/
+# oh-my-claudecode state
+.omc/
 # OS generated files
 .DS_Store
 *.local
@@ -53,3 +55,6 @@ web/
 backend/Dockerfile.langgraph
 config.yaml.bak
 helm/deerflow/values.yaml
+.playwright-mcp
+.gstack/
+.worktrees

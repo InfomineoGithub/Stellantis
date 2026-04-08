@@ -1,91 +1,35 @@
 import json
 import logging
 import shutil
-import stat
+from pathlib import Path
 import tempfile
 import zipfile
-from pathlib import Path
 
+from deerflow.skills.loader import get_skills_root_path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.gateway.dependencies import get_current_user
 from app.gateway.path_utils import resolve_thread_virtual_path
+from deerflow.agents.lead_agent.prompt import refresh_skills_system_prompt_cache_async
 from deerflow.config.extensions_config import ExtensionsConfig, SkillStateConfig, get_extensions_config, reload_extensions_config
 from deerflow.skills import Skill, load_skills
-from deerflow.skills.loader import get_skills_root_path
-from deerflow.skills.validation import _validate_skill_frontmatter
+from deerflow.skills.installer import SkillAlreadyExistsError, install_skill_from_archive
+from deerflow.skills.manager import (
+    append_history,
+    atomic_write,
+    custom_skill_exists,
+    ensure_custom_skill_is_editable,
+    get_custom_skill_dir,
+    get_custom_skill_file,
+    get_skill_history_file,
+    read_custom_skill_content,
+    read_history,
+    validate_skill_markdown_content,
+)
+from deerflow.skills.security_scanner import scan_skill_content
 
 logger = logging.getLogger(__name__)
-
-
-def _is_unsafe_zip_member(info: zipfile.ZipInfo) -> bool:
-    """Return True if the zip member path is absolute or attempts directory traversal."""
-    name = info.filename
-    if not name:
-        return False
-    path = Path(name)
-    if path.is_absolute():
-        return True
-    if ".." in path.parts:
-        return True
-    return False
-
-
-def _is_symlink_member(info: zipfile.ZipInfo) -> bool:
-    """Detect symlinks based on the external attributes stored in the ZipInfo."""
-    # Upper 16 bits of external_attr contain the Unix file mode when created on Unix.
-    mode = info.external_attr >> 16
-    return stat.S_ISLNK(mode)
-
-
-def _safe_extract_skill_archive(
-    zip_ref: zipfile.ZipFile,
-    dest_path: Path,
-    max_total_size: int = 512 * 1024 * 1024,
-) -> None:
-    """Safely extract a skill archive into dest_path with basic protections.
-
-    Protections:
-    - Reject absolute paths and directory traversal (..).
-    - Skip symlink entries instead of materialising them.
-    - Enforce a hard limit on total uncompressed size to mitigate zip bombs.
-    """
-    dest_root = Path(dest_path).resolve()
-    total_size = 0
-
-    for info in zip_ref.infolist():
-        # Reject absolute paths or any path that attempts directory traversal.
-        if _is_unsafe_zip_member(info):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Archive contains unsafe member path: {info.filename!r}",
-            )
-
-        # Skip any symlink entries instead of materialising them on disk.
-        if _is_symlink_member(info):
-            logger.warning("Skipping symlink entry in skill archive: %s", info.filename)
-            continue
-
-        # Basic unzip-bomb defence: bound the total uncompressed size we will write.
-        total_size += max(info.file_size, 0)
-        if total_size > max_total_size:
-            raise HTTPException(
-                status_code=400,
-                detail="Skill archive is too large or appears highly compressed.",
-            )
-
-        member_path = dest_root / info.filename
-        member_path_parent = member_path.parent
-        member_path_parent.mkdir(parents=True, exist_ok=True)
-
-        if info.is_dir():
-            member_path.mkdir(parents=True, exist_ok=True)
-            continue
-
-        with zip_ref.open(info) as src, open(member_path, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-
 
 router = APIRouter(prefix="/api", tags=["skills"])
 
@@ -127,17 +71,20 @@ class SkillInstallResponse(BaseModel):
     message: str = Field(..., description="Installation result message")
 
 
-def _should_ignore_archive_entry(path: Path) -> bool:
-    return path.name.startswith(".") or path.name == "__MACOSX"
+class CustomSkillContentResponse(SkillResponse):
+    content: str = Field(..., description="Raw SKILL.md content")
 
 
-def _resolve_skill_dir_from_archive_root(temp_path: Path) -> Path:
-    extracted_items = [item for item in temp_path.iterdir() if not _should_ignore_archive_entry(item)]
-    if len(extracted_items) == 0:
-        raise HTTPException(status_code=400, detail="Skill archive is empty")
-    if len(extracted_items) == 1 and extracted_items[0].is_dir():
-        return extracted_items[0]
-    return temp_path
+class CustomSkillUpdateRequest(BaseModel):
+    content: str = Field(..., description="Replacement SKILL.md content")
+
+
+class CustomSkillHistoryResponse(BaseModel):
+    history: list[dict]
+
+
+class SkillRollbackRequest(BaseModel):
+    history_index: int = Field(default=-1, description="History entry index to restore from, defaulting to the latest change.")
 
 
 def _skill_to_response(skill: Skill) -> SkillResponse:
@@ -188,12 +135,186 @@ async def list_skills(_user: dict = Depends(get_current_user)) -> SkillsListResp
         ```
     """
     try:
-        # Load all skills (including disabled ones)
         skills = load_skills(enabled_only=False)
         return SkillsListResponse(skills=[_skill_to_response(skill) for skill in skills])
     except Exception as e:
         logger.error(f"Failed to load skills: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to load skills: {str(e)}")
+
+
+@router.post(
+    "/skills/install",
+    response_model=SkillInstallResponse,
+    summary="Install Skill",
+    description="Install a skill from a .skill file (ZIP archive) located in the thread's user-data directory.",
+)
+async def install_skill(request: SkillInstallRequest) -> SkillInstallResponse:
+    try:
+        skill_file_path = resolve_thread_virtual_path(request.thread_id, request.path)
+        result = install_skill_from_archive(skill_file_path)
+        await refresh_skills_system_prompt_cache_async()
+        return SkillInstallResponse(**result)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except SkillAlreadyExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to install skill: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to install skill: {str(e)}")
+
+
+@router.get("/skills/custom", response_model=SkillsListResponse, summary="List Custom Skills")
+async def list_custom_skills() -> SkillsListResponse:
+    try:
+        skills = [skill for skill in load_skills(enabled_only=False) if skill.category == "custom"]
+        return SkillsListResponse(skills=[_skill_to_response(skill) for skill in skills])
+    except Exception as e:
+        logger.error("Failed to list custom skills: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to list custom skills: {str(e)}")
+
+
+@router.get("/skills/custom/{skill_name}", response_model=CustomSkillContentResponse, summary="Get Custom Skill Content")
+async def get_custom_skill(skill_name: str) -> CustomSkillContentResponse:
+    try:
+        skills = load_skills(enabled_only=False)
+        skill = next((s for s in skills if s.name == skill_name and s.category == "custom"), None)
+        if skill is None:
+            raise HTTPException(status_code=404, detail=f"Custom skill '{skill_name}' not found")
+        return CustomSkillContentResponse(**_skill_to_response(skill).model_dump(), content=read_custom_skill_content(skill_name))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get custom skill %s: %s", skill_name, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get custom skill: {str(e)}")
+
+
+@router.put("/skills/custom/{skill_name}", response_model=CustomSkillContentResponse, summary="Edit Custom Skill")
+async def update_custom_skill(skill_name: str, request: CustomSkillUpdateRequest) -> CustomSkillContentResponse:
+    try:
+        ensure_custom_skill_is_editable(skill_name)
+        validate_skill_markdown_content(skill_name, request.content)
+        scan = await scan_skill_content(request.content, executable=False, location=f"{skill_name}/SKILL.md")
+        if scan.decision == "block":
+            raise HTTPException(status_code=400, detail=f"Security scan blocked the edit: {scan.reason}")
+        skill_file = get_custom_skill_dir(skill_name) / "SKILL.md"
+        prev_content = skill_file.read_text(encoding="utf-8")
+        atomic_write(skill_file, request.content)
+        append_history(
+            skill_name,
+            {
+                "action": "human_edit",
+                "author": "human",
+                "thread_id": None,
+                "file_path": "SKILL.md",
+                "prev_content": prev_content,
+                "new_content": request.content,
+                "scanner": {"decision": scan.decision, "reason": scan.reason},
+            },
+        )
+        await refresh_skills_system_prompt_cache_async()
+        return await get_custom_skill(skill_name)
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to update custom skill %s: %s", skill_name, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update custom skill: {str(e)}")
+
+
+@router.delete("/skills/custom/{skill_name}", summary="Delete Custom Skill")
+async def delete_custom_skill(skill_name: str) -> dict[str, bool]:
+    try:
+        ensure_custom_skill_is_editable(skill_name)
+        skill_dir = get_custom_skill_dir(skill_name)
+        prev_content = read_custom_skill_content(skill_name)
+        append_history(
+            skill_name,
+            {
+                "action": "human_delete",
+                "author": "human",
+                "thread_id": None,
+                "file_path": "SKILL.md",
+                "prev_content": prev_content,
+                "new_content": None,
+                "scanner": {"decision": "allow", "reason": "Deletion requested."},
+            },
+        )
+        shutil.rmtree(skill_dir)
+        await refresh_skills_system_prompt_cache_async()
+        return {"success": True}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to delete custom skill %s: %s", skill_name, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete custom skill: {str(e)}")
+
+
+@router.get("/skills/custom/{skill_name}/history", response_model=CustomSkillHistoryResponse, summary="Get Custom Skill History")
+async def get_custom_skill_history(skill_name: str) -> CustomSkillHistoryResponse:
+    try:
+        if not custom_skill_exists(skill_name) and not get_skill_history_file(skill_name).exists():
+            raise HTTPException(status_code=404, detail=f"Custom skill '{skill_name}' not found")
+        return CustomSkillHistoryResponse(history=read_history(skill_name))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to read history for %s: %s", skill_name, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to read history: {str(e)}")
+
+
+@router.post("/skills/custom/{skill_name}/rollback", response_model=CustomSkillContentResponse, summary="Rollback Custom Skill")
+async def rollback_custom_skill(skill_name: str, request: SkillRollbackRequest) -> CustomSkillContentResponse:
+    try:
+        if not custom_skill_exists(skill_name) and not get_skill_history_file(skill_name).exists():
+            raise HTTPException(status_code=404, detail=f"Custom skill '{skill_name}' not found")
+        history = read_history(skill_name)
+        if not history:
+            raise HTTPException(status_code=400, detail=f"Custom skill '{skill_name}' has no history")
+        record = history[request.history_index]
+        target_content = record.get("prev_content")
+        if target_content is None:
+            raise HTTPException(status_code=400, detail="Selected history entry has no previous content to roll back to")
+        validate_skill_markdown_content(skill_name, target_content)
+        scan = await scan_skill_content(target_content, executable=False, location=f"{skill_name}/SKILL.md")
+        skill_file = get_custom_skill_file(skill_name)
+        current_content = skill_file.read_text(encoding="utf-8") if skill_file.exists() else None
+        history_entry = {
+            "action": "rollback",
+            "author": "human",
+            "thread_id": None,
+            "file_path": "SKILL.md",
+            "prev_content": current_content,
+            "new_content": target_content,
+            "rollback_from_ts": record.get("ts"),
+            "scanner": {"decision": scan.decision, "reason": scan.reason},
+        }
+        if scan.decision == "block":
+            append_history(skill_name, history_entry)
+            raise HTTPException(status_code=400, detail=f"Rollback blocked by security scanner: {scan.reason}")
+        atomic_write(skill_file, target_content)
+        append_history(skill_name, history_entry)
+        await refresh_skills_system_prompt_cache_async()
+        return await get_custom_skill(skill_name)
+    except HTTPException:
+        raise
+    except IndexError:
+        raise HTTPException(status_code=400, detail="history_index is out of range")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to roll back custom skill %s: %s", skill_name, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to roll back custom skill: {str(e)}")
 
 
 @router.get(
@@ -281,42 +402,32 @@ async def update_skill(skill_name: str, request: SkillUpdateRequest, _user: dict
         ```
     """
     try:
-        # Find the skill to verify it exists
         skills = load_skills(enabled_only=False)
         skill = next((s for s in skills if s.name == skill_name), None)
 
         if skill is None:
             raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found")
 
-        # Get or create config path
         config_path = ExtensionsConfig.resolve_config_path()
         if config_path is None:
-            # Create new config file in parent directory (project root)
             config_path = Path.cwd().parent / "extensions_config.json"
             logger.info(f"No existing extensions config found. Creating new config at: {config_path}")
 
-        # Load current configuration
         extensions_config = get_extensions_config()
-
-        # Update the skill's enabled status
         extensions_config.skills[skill_name] = SkillStateConfig(enabled=request.enabled)
 
-        # Convert to JSON format (preserve MCP servers config)
         config_data = {
             "mcpServers": {name: server.model_dump() for name, server in extensions_config.mcp_servers.items()},
             "skills": {name: {"enabled": skill_config.enabled} for name, skill_config in extensions_config.skills.items()},
         }
 
-        # Write the configuration to file
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2)
 
         logger.info(f"Skills configuration updated and saved to: {config_path}")
-
-        # Reload the extensions config to update the global cache
         reload_extensions_config()
+        await refresh_skills_system_prompt_cache_async()
 
-        # Reload the skills to get the updated status (for API response)
         skills = load_skills(enabled_only=False)
         updated_skill = next((s for s in skills if s.name == skill_name), None)
 

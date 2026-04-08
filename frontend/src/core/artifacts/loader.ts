@@ -21,7 +21,7 @@ export async function loadArtifactContent({
   const url = urlOfArtifact({ filepath: enhancedFilepath, threadId, isMock });
   const response = await fetchWithAuth(url);
   const text = await response.text();
-  return text;
+  return { content: text, url };
 }
 
 export function loadArtifactContentFromToolCall({
