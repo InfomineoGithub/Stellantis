@@ -21,6 +21,14 @@ from deerflow.models import create_chat_model
 
 logger = logging.getLogger(__name__)
 
+# Curated skill whitelist for the default lead agent.
+# Only fundamental DeerFlow skills are included; add here sparingly.
+_DEFAULT_LEAD_AGENT_SKILLS: set[str] = {
+    "deep-research",  # Systematic multi-angle research methodology
+    "bootstrap",  # Agent personality onboarding (SOUL.md creation)
+    "find-skills",  # Discover & install additional skills from the ecosystem
+}
+
 
 def _resolve_model_name(requested_model_name: str | None = None) -> str:
     """Resolve a runtime model name safely, falling back to default if invalid. Returns None if no models are configured."""
@@ -328,6 +336,6 @@ def make_lead_agent(config: RunnableConfig):
         model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort),
         tools=get_available_tools(model_name=model_name, groups=agent_config.tool_groups if agent_config else None, subagent_enabled=subagent_enabled),
         middleware=_build_middlewares(config, model_name=model_name, agent_name=agent_name),
-        system_prompt=apply_prompt_template(subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, agent_name=agent_name),
+        system_prompt=apply_prompt_template(subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, agent_name=agent_name, available_skills=_DEFAULT_LEAD_AGENT_SKILLS),
         state_schema=ThreadState,
     )
