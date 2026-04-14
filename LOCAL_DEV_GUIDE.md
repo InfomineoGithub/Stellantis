@@ -69,7 +69,7 @@ You only ever open `http://localhost:2026` in your browser; Nginx handles the ro
 
 **Why:** Required to clone the repository and manage source code.
 
-Download and install from [git-scm.com/download/win](https://git-scm.com/download/win).  
+Download and install from [git-scm.com/download/win](https://git-scm.com/download/win).
 Accept all default options during installation.
 
 Verify in a new PowerShell or CMD window:
@@ -101,7 +101,7 @@ uv --version
 
 **Why:** The frontend is a Next.js application. Node.js is its runtime. Node 22 is required (as enforced by `make check`).
 
-Download the **LTS (v22.x)** installer from [nodejs.org](https://nodejs.org/en/download).  
+Download the **LTS (v22.x)** installer from [nodejs.org](https://nodejs.org/en/download).
 Run the `.msi` installer and accept defaults.
 
 Verify:
@@ -153,7 +153,7 @@ pnpm -v
 
 **Why:** Only needed if you want to use the container-based (Docker) sandbox mode, which gives the AI agent a fully isolated execution environment. For basic local development and testing, the simpler **local sandbox** (direct execution on your machine) is sufficient.
 
-Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/).  
+Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/).
 After install, ensure Docker Desktop is running before using any Docker-related commands.
 
 ---
@@ -369,13 +369,37 @@ This starts all four services (LangGraph server, Gateway API, Next.js, Nginx) in
 
 ### Option B — Services in separate terminals (recommended for development)
 
+If you want the Windows helper to do the dependency install, run both migration flows, and then open the service windows for you, run this once from the project root:
+
+```powershell
+.\start-dev.ps1
+```
+
+What it does before opening the windows:
+- Runs `uv sync` in `backend/`
+- Runs `pnpm install` in `frontend/`
+- Runs `pnpm exec better-auth migrate --config .\src\server\better-auth\config.ts`
+- Runs `uv run alembic upgrade head`
+- Starts nginx, LangGraph with reload enabled, Gateway with reload enabled, and the frontend with `pnpm run dev`
+- Runs them hidden in the background by default so you stay in one parent terminal
+
+Useful variants:
+
+```powershell
+.\start-dev-visible.ps1           # separate windows with visible logs
+.\start-dev.ps1 -Stop             # stop services started by the helper
+.\stop-dev.ps1                    # dedicated shutdown script
+```
+
+If you prefer to manage each service yourself, use the manual steps below.
+
 Open **4 separate PowerShell terminals**, all from the project root directory:
 
 #### Terminal 1 — LangGraph Agent Server (port 2024)
 
 ```powershell
 cd backend
-uv run langgraph dev --no-browser --allow-blocking --no-reload
+uv run langgraph dev --no-browser --allow-blocking
 ```
 
 **Why:** This is the AI agent engine. It runs the `lead_agent` LangGraph workflow that processes chat messages and streams results. Changes here require manual restart.

@@ -202,6 +202,8 @@ Prerequisite: complete the "Configuration" steps above first (`make config` and 
    make dev
    ```
 
+  On Windows PowerShell, you can use `./start-dev.ps1` instead. The script installs backend and frontend dependencies, runs Better Auth and Alembic migrations, then starts nginx, LangGraph, Gateway, and the frontend hidden in the background by default. Use `./start-dev-visible.ps1` if you want separate PowerShell terminals with live logs for debugging, `./start-dev.ps1 -Stop` to stop the managed services, or `./stop-dev.ps1` as a dedicated shutdown command.
+
 5. **Access**: http://localhost:2026
 
 ### Advanced
