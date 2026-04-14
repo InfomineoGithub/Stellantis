@@ -512,5 +512,39 @@ A `BYPASS_AUTH=true` environment variable skips validation in local development.
 
 ---
 
+## ADR-015: Mtime-Based Config Cache Invalidation Without a File Watcher
+
+**Status:** Accepted
+**Date:** 2026-04-14
+
+### Context
+
+`get_app_config()` returns a cached singleton so the config file is not re-parsed on every API request. During development the config file changes frequently (model keys, tool toggles, sandbox settings) and the previous implementation never reloaded — the server had to be restarted to pick up changes.
+
+Two approaches exist for detecting file changes:
+
+1. **File-watcher daemon** (watchfiles, watchdog): A background thread/process watches the filesystem for inotify/FSEvents/ReadDirectoryChangesW events and signals the application to reload.
+2. **Mtime polling on access**: Each call to `get_app_config()` reads the file's `st_mtime_ns` and compares it to the cached value. If different, the config is reloaded before returning.
+
+### Decision
+
+Use **mtime polling on access** (`Path.stat().st_mtime_ns` comparison on every `get_app_config()` call). No file-watcher dependency is added.
+
+The cache stores three globals: `_app_config`, `_app_config_path`, and `_app_config_mtime_ns`. All three are cleared together by `reset_app_config()` and updated atomically on reload. If the path or mtime has changed since the last read, the config is reloaded transparently.
+
+### Alternatives considered
+
+- **File-watcher daemon (watchfiles):** Already in the dependency tree (LangGraph uses it for hot-reload). Would push reload to a background thread rather than the hot path of each request. Adds complexity: thread lifecycle, synchronisation, and platform-specific behaviour (FSEvents vs inotify vs ReadDirectoryChangesW). On Windows the watcher holds a directory handle that prevents `TemporaryDirectory` cleanup in tests. Rejected: the polling cost is negligible for a config that changes only during development.
+
+- **Explicit `reload_app_config()` call required:** Force callers to call `reload_app_config()` whenever they know the file changed. Simpler internally but requires coordination — the Gateway API would need to reload on every mutating request and the LangGraph server would need its own reload path. Rejected: error-prone and inconsistent.
+
+### Consequences
+
+- **Positive:** Config changes are picked up automatically by the next API call — no restart required. No new dependency. The cache is always coherent: path, mtime, and the config object are updated together.
+- **Negative:** Every `get_app_config()` call does one `stat()` syscall. Acceptable — `stat()` is a fast VFS call and config is read only on the critical path for agent initialisation, not on every token produced.
+- **Key files:** `backend/packages/harness/deerflow/config/app_config.py` (`get_app_config`, `reload_app_config`, `reset_app_config`, `_read_config_cache_metadata`)
+
+---
+
 *ADRs.md — Phase 1: Business Domain Integration*
 *Created: 2026-04-05*
