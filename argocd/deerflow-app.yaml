@@ -19,6 +19,7 @@ metadata:
     argocd-image-updater.argoproj.io/provisioner.update-strategy: digest
     argocd-image-updater.argoproj.io/provisioner.helm.image-name: images.provisioner.repository
     argocd-image-updater.argoproj.io/provisioner.helm.image-tag: images.provisioner.tag
+    argocd-image-updater.argoproj.io/git.commit-message-template: "chore: update image {{.image_name}} to {{.image_tag}} [skip ci]"
 spec:
   project: default
   source:
