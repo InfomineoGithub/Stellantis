@@ -5,7 +5,7 @@ import { Pool } from "pg";
 import { env } from "../../env";
 
 export const auth = betterAuth({
-  baseURL: env.NEXT_PUBLIC_BACKEND_BASE_URL ?? "http://localhost:2026",
+  baseURL: env.BETTER_AUTH_URL ?? "http://localhost:2026",
   database: new Pool({
     connectionString: env.DATABASE_URL ?? "",
   }),

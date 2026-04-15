@@ -10,10 +10,10 @@ data:
     config_version: 1
 
     models:
-      - name: gemini-2.5-pro
-        display_name: Gemini 2.5 Pro
+      - name: gemini-3.1-pro-preview
+        display_name: Gemini 3.1 Pro
         use: langchain_google_genai:ChatGoogleGenerativeAI
-        model: gemini-2.5-pro
+        model: gemini-3.1-pro-preview
         google_api_key: $GOOGLE_API_KEY
         max_tokens: 8192
         supports_vision: true
