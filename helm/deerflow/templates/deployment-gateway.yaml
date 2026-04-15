@@ -61,11 +61,11 @@ spec:
             - name: config
               mountPath: /app/backend/config.yaml
               subPath: config.yaml
-              readOnly: true
+              readOnly: false
             - name: config
               mountPath: /app/backend/extensions_config.json
               subPath: extensions_config.json
-              readOnly: true
+              readOnly: false
             - name: deer-flow-home
               mountPath: /app/backend/.deer-flow
             - name: deer-flow-home
