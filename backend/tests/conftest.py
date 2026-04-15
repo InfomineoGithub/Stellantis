@@ -12,6 +12,15 @@ from unittest.mock import MagicMock
 # Force auth bypass for all tests so they don't need a valid JWT token
 os.environ["BYPASS_AUTH"] = "true"
 
+# On Windows, fcntl is not available. Provide a minimal stub so that
+# aio_sandbox_provider (which uses fcntl for cross-process locking) can be
+# imported in unit tests without running on a Unix host.
+if sys.platform == "win32" and "fcntl" not in sys.modules:
+    _fcntl_mock = MagicMock()
+    _fcntl_mock.LOCK_EX = 2
+    _fcntl_mock.LOCK_UN = 8
+    sys.modules["fcntl"] = _fcntl_mock
+
 # Make 'app' and 'deerflow' importable from any working directory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

@@ -39,6 +39,8 @@ DEFAULT_PORT = 8080
 DEFAULT_CONTAINER_PREFIX = "deer-flow-sandbox"
 DEFAULT_IDLE_TIMEOUT = 600  # 10 minutes in seconds
 DEFAULT_REPLICAS = 3  # Maximum concurrent sandbox containers
+DEFAULT_PRE_WARM_COUNT = 0  # disabled by default
+DEFAULT_MAX_THREADS_PER_SANDBOX = 1  # dedicated pod per thread by default
 IDLE_CHECK_INTERVAL = 60  # Check every 60 seconds
 
 
@@ -138,6 +140,8 @@ class AioSandboxProvider(SandboxProvider):
             "environment": self._resolve_env_vars(sandbox_config.environment or {}),
             # provisioner URL for dynamic pod management (e.g. http://provisioner:8002)
             "provisioner_url": getattr(sandbox_config, "provisioner_url", None) or "",
+            "pre_warm_count": getattr(sandbox_config, "pre_warm_count", None) or DEFAULT_PRE_WARM_COUNT,
+            "max_threads_per_sandbox": getattr(sandbox_config, "max_threads_per_sandbox", None) or DEFAULT_MAX_THREADS_PER_SANDBOX,
         }
 
     @staticmethod

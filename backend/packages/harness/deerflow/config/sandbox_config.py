@@ -49,6 +49,14 @@ class SandboxConfig(BaseModel):
         default=None,
         description="Idle timeout in seconds before sandbox is released (default: 600 = 10 minutes). Set to 0 to disable.",
     )
+    pre_warm_count: int | None = Field(
+        default=None,
+        description="Number of sandbox Pods to pre-warm at startup (default: 0 = disabled). Pre-warmed Pods are served instantly to new threads, eliminating provisioner cold-start.",
+    )
+    max_threads_per_sandbox: int | None = Field(
+        default=None,
+        description="Maximum number of lead-agent threads that may share one sandbox Pod (default: 1 = dedicated pod per thread). All subagents of those threads share the same Pod.",
+    )
     mounts: list[VolumeMountConfig] = Field(
         default_factory=list,
         description="List of volume mounts to share directories between host and container",
