@@ -23,7 +23,7 @@ export const auth = betterAuth({
     "http://127.0.0.1:2026",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://35-233-7-70.nip.io:2026/",
+    "http://35-233-7-70.nip.io:2026",
     env.NEXT_PUBLIC_BACKEND_BASE_URL ?? ""
   ].filter(Boolean),
   plugins: [
