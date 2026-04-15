@@ -250,6 +250,17 @@ sandbox:
 #   # Optional: Base port for sandbox containers (default: 8080)
 #   # port: 8080
 
+#   # Optional: Number of sandbox Pods to pre-warm at startup
+#   # Pre-warmed Pods are served instantly to new threads (no provisioner wait).
+#   # Set to 0 (default) to disable. Recommended: 2-3 for provisioner/K8s mode.
+#   # pre_warm_count: 0
+#
+#   # Optional: Maximum number of lead-agent threads that may share one sandbox Pod.
+#   # All subagents of those threads share the same Pod automatically.
+#   # Set to 1 (default) for dedicated-pod-per-thread.
+#   # Set to 3 to allow up to 3 lead agents (and subagents) per Pod.
+#   # max_threads_per_sandbox: 1
+
 #   # Optional: Maximum number of concurrent sandbox containers (default: 3)
 #   # When the limit is reached the least-recently-used sandbox is evicted to
 #   # make room for new ones. Use a positive integer here; omit this field to use the default.
