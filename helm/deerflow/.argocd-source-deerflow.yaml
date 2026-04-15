@@ -16,5 +16,5 @@ helm:
     value: europe-west1-docker.pkg.dev/stellantis-490509/deer-flow-provisioner/provisioner
     forcestring: true
   - name: images.provisioner.tag
-    value: latest@sha256:a4f341eaa7609642bbda144a77c6ff4e8ad0aed6209008591e7b73b98b052522
+    value: latest@sha256:7e822a67d37d50d7a8f28892ca8f75696d064c34c9891fe935bcaabb3899b6c4
     forcestring: true
