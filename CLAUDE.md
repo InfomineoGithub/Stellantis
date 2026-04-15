@@ -27,6 +27,15 @@ make docker-init    # Pull sandbox Docker image
 make docker-start   # Start Docker-based dev environment
 ```
 
+Windows helper:
+```powershell
+.\start-dev.ps1
+.\start-dev-visible.ps1
+.\stop-dev.ps1
+```
+
+The helper script loads local env files, runs `uv sync`, `pnpm install`, `pnpm exec better-auth migrate`, and `uv run alembic upgrade head`, then starts nginx, LangGraph, Gateway, and the frontend hidden in the background by default. Use `./start-dev-visible.ps1` for dedicated PowerShell windows with visible logs, `./start-dev.ps1 -Stop` to stop the managed services, or `./stop-dev.ps1` as the dedicated shutdown wrapper. LangGraph is started without `--no-reload`, so code reload remains enabled.
+
 **Backend only** (from `backend/`):
 ```bash
 make install    # Install Python dependencies via uv

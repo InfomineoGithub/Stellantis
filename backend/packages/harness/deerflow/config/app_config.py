@@ -217,6 +217,14 @@ class AppConfig(BaseModel):
 
 
 _app_config: AppConfig | None = None
+_app_config_path: Path | None = None
+_app_config_mtime_ns: int | None = None
+
+
+def _read_config_cache_metadata(config_path: str | None = None) -> tuple[Path, int]:
+    """Resolve the active config path and return its current mtime."""
+    path = AppConfig.resolve_config_path(config_path)
+    return path, path.stat().st_mtime_ns
 
 
 def get_app_config() -> AppConfig:
@@ -225,9 +233,12 @@ def get_app_config() -> AppConfig:
     Returns a cached singleton instance. Use `reload_app_config()` to reload
     from file, or `reset_app_config()` to clear the cache.
     """
-    global _app_config
-    if _app_config is None:
-        _app_config = AppConfig.from_file()
+    global _app_config, _app_config_path, _app_config_mtime_ns
+    path, mtime_ns = _read_config_cache_metadata()
+    if _app_config is None or _app_config_path != path or _app_config_mtime_ns != mtime_ns:
+        _app_config = AppConfig.from_file(str(path))
+        _app_config_path = path
+        _app_config_mtime_ns = mtime_ns
     return _app_config
 
 
@@ -244,8 +255,11 @@ def reload_app_config(config_path: str | None = None) -> AppConfig:
     Returns:
         The newly loaded AppConfig instance.
     """
-    global _app_config
-    _app_config = AppConfig.from_file(config_path)
+    global _app_config, _app_config_path, _app_config_mtime_ns
+    path, mtime_ns = _read_config_cache_metadata(config_path)
+    _app_config = AppConfig.from_file(str(path))
+    _app_config_path = path
+    _app_config_mtime_ns = mtime_ns
     return _app_config
 
 
@@ -256,8 +270,10 @@ def reset_app_config() -> None:
     `get_app_config()` to reload from file. Useful for testing
     or when switching between different configurations.
     """
-    global _app_config
+    global _app_config, _app_config_path, _app_config_mtime_ns
     _app_config = None
+    _app_config_path = None
+    _app_config_mtime_ns = None
 
 
 def set_app_config(config: AppConfig) -> None:
@@ -268,5 +284,7 @@ def set_app_config(config: AppConfig) -> None:
     Args:
         config: The AppConfig instance to use.
     """
-    global _app_config
+    global _app_config, _app_config_path, _app_config_mtime_ns
     _app_config = config
+    _app_config_path = None
+    _app_config_mtime_ns = None
