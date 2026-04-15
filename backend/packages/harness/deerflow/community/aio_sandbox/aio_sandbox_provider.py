@@ -11,7 +11,6 @@ The provider itself handles:
 """
 
 import atexit
-import fcntl
 import hashlib
 import logging
 import os
@@ -19,6 +18,14 @@ import signal
 import threading
 import time
 import uuid
+
+try:
+    import fcntl as _fcntl
+
+    _HAS_FCNTL = True
+except ImportError:  # Windows
+    _fcntl = None  # type: ignore[assignment]
+    _HAS_FCNTL = False
 
 from deerflow.config import get_app_config
 from deerflow.config.paths import VIRTUAL_PATH_PREFIX, Paths, get_paths
@@ -86,6 +93,7 @@ class AioSandboxProvider(SandboxProvider):
         self._shutdown_called = False
         self._idle_checker_stop = threading.Event()
         self._idle_checker_thread: threading.Thread | None = None
+        self._prewarm_thread: threading.Thread | None = None
 
         self._config = self._load_config()
         self._backend: SandboxBackend = self._create_backend()
@@ -325,16 +333,34 @@ class AioSandboxProvider(SandboxProvider):
         except Exception as e:
             logger.error(f"Failed to pre-warm sandbox: {e}")
 
+    def _cleanup_dead_prewarm(self) -> None:
+        """Remove pre-warm pool entries whose containers are no longer running."""
+        with self._lock:
+            dead = [sid for sid, (info, _) in self._prewarm_pool.items() if not self._backend.is_alive(info)]
+        for sid in dead:
+            with self._lock:
+                entry = self._prewarm_pool.pop(sid, None)
+            if entry:
+                info, _ = entry
+                logger.warning(f"Pre-warm sandbox {sid} container died, removing from pool")
+                try:
+                    self._backend.destroy(info)
+                except Exception:
+                    pass
+
     def _prewarm_loop(self) -> None:
         target = self._config.get("pre_warm_count", DEFAULT_PRE_WARM_COUNT)
-        while not self._idle_checker_stop.wait(timeout=5):
+        while True:
             try:
+                self._cleanup_dead_prewarm()
                 with self._lock:
                     current = len(self._prewarm_pool)
                 if current < target:
                     self._prewarm_one()
             except Exception as e:
                 logger.error(f"Pre-warm loop error: {e}")
+            if self._idle_checker_stop.wait(timeout=5):
+                break  # stop event was set
 
     def _start_prewarm(self) -> None:
         count = self._config.get("pre_warm_count", DEFAULT_PRE_WARM_COUNT)
@@ -501,14 +527,23 @@ class AioSandboxProvider(SandboxProvider):
 
         The file lock serializes concurrent sandbox creation for the same thread_id
         across multiple processes, preventing container-name conflicts.
+        On Windows, fcntl is unavailable; the in-process threading.Lock is used instead
+        (single-process scenarios only — multi-process race is not expected on Windows).
         """
+        if _HAS_FCNTL:
+            return self._discover_or_create_with_fcntl(thread_id, sandbox_id)
+        # Windows: skip file lock, just use in-process lock (already held by caller)
+        return self._discover_or_create_no_file_lock(thread_id, sandbox_id)
+
+    def _discover_or_create_with_fcntl(self, thread_id: str, sandbox_id: str) -> str:
+        """Unix variant: serialize with a POSIX file lock."""
         paths = get_paths()
         paths.ensure_thread_dirs(thread_id)
         lock_path = paths.thread_dir(thread_id) / f"{sandbox_id}.lock"
 
         with open(lock_path, "a", encoding="utf-8") as lock_file:
             try:
-                fcntl.flock(lock_file, fcntl.LOCK_EX)
+                _fcntl.flock(lock_file, _fcntl.LOCK_EX)
                 # Re-check in-process caches under the file lock in case another
                 # thread in this process won the race while we were waiting.
                 with self._lock:
@@ -543,7 +578,42 @@ class AioSandboxProvider(SandboxProvider):
 
                 return self._create_sandbox(thread_id, sandbox_id)
             finally:
-                fcntl.flock(lock_file, fcntl.LOCK_UN)
+                _fcntl.flock(lock_file, _fcntl.LOCK_UN)
+
+    def _discover_or_create_no_file_lock(self, thread_id: str, sandbox_id: str) -> str:
+        """Windows variant: no file lock — rely on in-process threading.Lock."""
+        # Re-check in-process cache (another thread may have created it)
+        with self._lock:
+            if thread_id in self._thread_sandboxes:
+                existing_id = self._thread_sandboxes[thread_id]
+                if existing_id in self._sandboxes:
+                    logger.info(f"Reusing in-process sandbox {existing_id} for thread {thread_id} (post-lock check)")
+                    self._last_activity[existing_id] = time.time()
+                    return existing_id
+            if sandbox_id in self._warm_pool:
+                info, _ = self._warm_pool.pop(sandbox_id)
+                sandbox = AioSandbox(id=sandbox_id, base_url=info.sandbox_url)
+                self._sandboxes[sandbox_id] = sandbox
+                self._sandbox_infos[sandbox_id] = info
+                self._last_activity[sandbox_id] = time.time()
+                self._thread_sandboxes[thread_id] = sandbox_id
+                logger.info(f"Reclaimed warm-pool sandbox {sandbox_id} for thread {thread_id} (no-file-lock check)")
+                return sandbox_id
+
+        # Backend discovery
+        discovered = self._backend.discover(sandbox_id)
+        if discovered is not None:
+            sandbox = AioSandbox(id=discovered.sandbox_id, base_url=discovered.sandbox_url)
+            with self._lock:
+                self._sandboxes[discovered.sandbox_id] = sandbox
+                self._sandbox_infos[discovered.sandbox_id] = discovered
+                self._last_activity[discovered.sandbox_id] = time.time()
+                self._ref_counts[discovered.sandbox_id] = self._ref_counts.get(discovered.sandbox_id, 0) + 1
+                self._thread_sandboxes[thread_id] = discovered.sandbox_id
+            logger.info(f"Discovered existing sandbox {discovered.sandbox_id} for thread {thread_id} at {discovered.sandbox_url}")
+            return discovered.sandbox_id
+
+        return self._create_sandbox(thread_id, sandbox_id)
 
     def _evict_oldest_warm(self) -> None:
         """Destroy the oldest warm pool sandbox to make room for a new one."""

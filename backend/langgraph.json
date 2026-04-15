@@ -13,5 +13,8 @@
   },
   "auth": {
     "path": "./src/auth.py:auth"
+  },
+  "http": {
+    "app": "deerflow.lifespan:app"
   }
 }
