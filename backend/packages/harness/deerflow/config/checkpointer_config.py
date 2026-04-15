@@ -25,19 +25,45 @@ class CheckpointerConfig(BaseModel):
     )
 
 
-# Global configuration instance — None means no checkpointer is configured.
-_checkpointer_config: CheckpointerConfig | None = None
+# Sentinel: distinguishes "never set" from "explicitly set to None".
+# get_checkpointer() only triggers app-config loading when the state is _UNSET.
+_UNSET: object = object()
+
+# Global configuration instance.
+# _UNSET  → never initialised (app config should be consulted).
+# None    → explicitly set to "no checkpointer" (e.g. by a test fixture).
+# config  → a real CheckpointerConfig chosen by set_checkpointer_config / YAML load.
+_checkpointer_config: object = _UNSET
 
 
 def get_checkpointer_config() -> CheckpointerConfig | None:
     """Get the current checkpointer configuration, or None if not configured."""
-    return _checkpointer_config
+    if _checkpointer_config is _UNSET:
+        return None
+    return _checkpointer_config  # type: ignore[return-value]
+
+
+def is_checkpointer_config_set() -> bool:
+    """Return True if the config was explicitly set (even to None), False if never initialised."""
+    return _checkpointer_config is not _UNSET
 
 
 def set_checkpointer_config(config: CheckpointerConfig | None) -> None:
     """Set the checkpointer configuration."""
     global _checkpointer_config
     _checkpointer_config = config
+
+
+def reset_checkpointer_config() -> None:
+    """Reset checkpointer config back to the uninitialised sentinel.
+
+    Use this (instead of ``set_checkpointer_config(None)``) when you want
+    ``get_checkpointer()`` to re-consult the app config on the next call.
+    In tests, ``set_checkpointer_config(None)`` is the right call to say
+    "no checkpointer" — the sentinel is an internal implementation detail.
+    """
+    global _checkpointer_config
+    _checkpointer_config = _UNSET
 
 
 def load_checkpointer_config_from_dict(config_dict: dict) -> None:

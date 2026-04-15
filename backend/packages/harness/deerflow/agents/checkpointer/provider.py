@@ -125,13 +125,14 @@ def get_checkpointer() -> Checkpointer:
     if _checkpointer is not None:
         return _checkpointer
 
-    # Ensure app config is loaded before checking checkpointer config
-    # This prevents returning InMemorySaver when config.yaml actually has a checkpointer section
-    # but hasn't been loaded yet
+    # Ensure app config is loaded before checking checkpointer config, but only
+    # when the config was never explicitly set (sentinel state).  If a caller
+    # already called set_checkpointer_config() — even to None — we respect that
+    # and skip the file-based load so tests can control the outcome.
     from deerflow.config.app_config import _app_config
-    from deerflow.config.checkpointer_config import get_checkpointer_config
+    from deerflow.config.checkpointer_config import get_checkpointer_config, is_checkpointer_config_set
 
-    if _app_config is None:
+    if not is_checkpointer_config_set() and _app_config is None:
         # Only load config if it hasn't been initialized yet
         # In tests, config may be set directly via set_checkpointer_config()
         try:
