@@ -239,6 +239,56 @@ class AioSandboxProvider(SandboxProvider):
             logger.warning(f"Could not setup skills mount: {e}")
         return None
 
+    def _get_prewarm_mounts(self, sandbox_id: str) -> list[tuple[str, str, bool]] | None:
+        """Create mount points for a pre-warmed sandbox (local backend only).
+
+        For local container backends, pre-warmed sandboxes need writable
+        /mnt/user-data directories even though no thread has claimed them yet.
+        We create temporary host directories under {base_dir}/prewarm/{sandbox_id}/
+        and mount them into the container.
+
+        For remote/provisioner backends, returns None (the provisioner handles
+        filesystem setup inside the Pod).
+        """
+        if not isinstance(self._backend, LocalContainerBackend):
+            return None
+
+        paths = get_paths()
+        prewarm_base = paths.base_dir / "prewarm" / sandbox_id
+
+        for subdir in ["workspace", "uploads", "outputs"]:
+            d = prewarm_base / subdir
+            d.mkdir(parents=True, exist_ok=True)
+            d.chmod(0o777)
+
+        # Use host_base_dir for mount sources (DooD support)
+        host_prewarm_base = Paths(base_dir=paths.host_base_dir).base_dir / "prewarm" / sandbox_id
+
+        mounts = [
+            (str(host_prewarm_base / "workspace"), f"{VIRTUAL_PATH_PREFIX}/workspace", False),
+            (str(host_prewarm_base / "uploads"), f"{VIRTUAL_PATH_PREFIX}/uploads", False),
+            (str(host_prewarm_base / "outputs"), f"{VIRTUAL_PATH_PREFIX}/outputs", False),
+        ]
+
+        skills_mount = self._get_skills_mount()
+        if skills_mount:
+            mounts.append(skills_mount)
+
+        return mounts
+
+    @staticmethod
+    def _cleanup_prewarm_dir(sandbox_id: str) -> None:
+        """Remove temporary host directories created for a pre-warmed sandbox."""
+        if not sandbox_id.startswith("pw-"):
+            return
+        import shutil
+
+        paths = get_paths()
+        prewarm_dir = paths.base_dir / "prewarm" / sandbox_id
+        if prewarm_dir.exists():
+            shutil.rmtree(prewarm_dir, ignore_errors=True)
+            logger.debug(f"Cleaned up prewarm directory for {sandbox_id}")
+
     # ── Idle timeout management ──────────────────────────────────────────
 
     def _start_idle_checker(self) -> None:
@@ -317,12 +367,16 @@ class AioSandboxProvider(SandboxProvider):
         Uses thread_id=None so the provisioner backend creates a Pod without
         thread-specific configuration. The Pod is claimed and re-keyed when
         a thread calls acquire().
+
+        For local container backends, temporary host directories are created
+        and mounted so that /mnt/user-data/* is writable inside the container.
         """
         import uuid
 
         sandbox_id = f"pw-{uuid.uuid4().hex[:8]}"
         try:
-            info = self._backend.create(thread_id=None, sandbox_id=sandbox_id, extra_mounts=None)
+            extra_mounts = self._get_prewarm_mounts(sandbox_id)
+            info = self._backend.create(thread_id=None, sandbox_id=sandbox_id, extra_mounts=extra_mounts)
             if wait_for_sandbox_ready(info.sandbox_url, timeout=120):
                 with self._lock:
                     self._prewarm_pool[sandbox_id] = (info, time.time())
@@ -347,6 +401,7 @@ class AioSandboxProvider(SandboxProvider):
                     self._backend.destroy(info)
                 except Exception:
                     pass
+                self._cleanup_prewarm_dir(sid)
 
     def _prewarm_loop(self) -> None:
         target = self._config.get("pre_warm_count", DEFAULT_PRE_WARM_COUNT)
@@ -354,8 +409,11 @@ class AioSandboxProvider(SandboxProvider):
             try:
                 self._cleanup_dead_prewarm()
                 with self._lock:
-                    current = len(self._prewarm_pool)
-                if current < target:
+                    current_prewarm = len(self._prewarm_pool)
+                    current_active = len(self._sandboxes)
+                # Count active sandboxes toward the target to avoid spawning
+                # replacement containers when pre-warmed ones are claimed.
+                if current_prewarm + current_active < target:
                     self._prewarm_one()
             except Exception as e:
                 logger.error(f"Pre-warm loop error: {e}")
@@ -799,6 +857,7 @@ class AioSandboxProvider(SandboxProvider):
         for sandbox_id, (info, _) in prewarm_items:
             try:
                 self._backend.destroy(info)
+                self._cleanup_prewarm_dir(sandbox_id)
                 logger.info(f"Destroyed pre-warmed sandbox {sandbox_id} during shutdown")
             except Exception as e:
                 logger.error(f"Failed to destroy pre-warmed sandbox {sandbox_id} during shutdown: {e}")

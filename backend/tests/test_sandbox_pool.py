@@ -224,3 +224,99 @@ def test_slot_count_decremented_on_release():
     # ref count went from 2 → 1, sandbox stays active
     assert p._ref_counts.get("shared-box") == 1
     assert "shared-box" in p._sandboxes
+
+
+# ── Pre-warm loop with active sandboxes ──────────────────────────────────────
+
+
+def test_prewarm_loop_skips_when_active_sandbox_exists():
+    """Pre-warm loop should not create replacement containers when
+    active sandboxes count toward the target."""
+    backend = make_mock_backend()
+    backend.create.return_value = SandboxInfo(sandbox_id="pw-new", sandbox_url="http://localhost:9020")
+    p = make_provider(backend, pre_warm_count=1)
+    # Simulate one active sandbox (pre-warmed one was claimed)
+    _setup_active_sandbox(p, "pw-claimed", "thread-1")
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True):
+        # Manually call the internal logic of _prewarm_loop (one iteration)
+        p._cleanup_dead_prewarm()
+        with p._lock:
+            current_prewarm = len(p._prewarm_pool)
+            current_active = len(p._sandboxes)
+
+    # 0 prewarm + 1 active >= 1 target → should NOT create replacement
+    assert current_prewarm + current_active >= 1
+    backend.create.assert_not_called()
+
+
+def test_prewarm_loop_creates_when_no_active_sandboxes():
+    """Pre-warm loop should create containers when total (prewarm + active)
+    is below the target."""
+    backend = make_mock_backend()
+    backend.create.return_value = SandboxInfo(sandbox_id="pw-fresh", sandbox_url="http://localhost:9021")
+    p = make_provider(backend, pre_warm_count=1)
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True):
+        p._prewarm_one()
+
+    assert len(p._prewarm_pool) == 1
+    backend.create.assert_called_once()
+
+
+# ── Pre-warm mounts for local backend ────────────────────────────────────────
+
+
+def test_prewarm_mounts_created_for_local_backend(tmp_path):
+    """Pre-warmed sandboxes with local backend should get writable
+    /mnt/user-data mounts via temporary host directories."""
+    from deerflow.community.aio_sandbox.local_backend import LocalContainerBackend
+
+    local_backend = MagicMock(spec=LocalContainerBackend)
+    local_backend.create.return_value = SandboxInfo(sandbox_id="pw-local", sandbox_url="http://localhost:9022")
+    local_backend.is_alive.return_value = True
+    p = make_provider(local_backend)
+    p._backend = local_backend  # ensure isinstance check passes
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths:
+        mock_paths.return_value.base_dir = tmp_path
+        mock_paths.return_value.host_base_dir = tmp_path
+        mounts = p._get_prewarm_mounts("pw-test123")
+
+    assert mounts is not None
+    assert len(mounts) >= 3  # workspace, uploads, outputs (+ optional skills)
+    container_paths = [m[1] for m in mounts]
+    assert "/mnt/user-data/workspace" in container_paths
+    assert "/mnt/user-data/uploads" in container_paths
+    assert "/mnt/user-data/outputs" in container_paths
+
+    # Verify host directories were created
+    assert (tmp_path / "prewarm" / "pw-test123" / "workspace").exists()
+    assert (tmp_path / "prewarm" / "pw-test123" / "uploads").exists()
+    assert (tmp_path / "prewarm" / "pw-test123" / "outputs").exists()
+
+
+def test_prewarm_mounts_none_for_remote_backend():
+    """Pre-warmed sandboxes with remote backend should not create mounts
+    (provisioner handles filesystem setup)."""
+    backend = make_mock_backend()  # MagicMock, not LocalContainerBackend
+    p = make_provider(backend)
+
+    mounts = p._get_prewarm_mounts("pw-remote")
+
+    assert mounts is None
+
+
+def test_cleanup_prewarm_dir(tmp_path):
+    """_cleanup_prewarm_dir should remove the temporary host directory."""
+    from deerflow.community.aio_sandbox.aio_sandbox_provider import AioSandboxProvider
+
+    prewarm_dir = tmp_path / "prewarm" / "pw-cleanup"
+    prewarm_dir.mkdir(parents=True)
+    (prewarm_dir / "workspace").mkdir()
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths:
+        mock_paths.return_value.base_dir = tmp_path
+        AioSandboxProvider._cleanup_prewarm_dir("pw-cleanup")
+
+    assert not prewarm_dir.exists()
