@@ -21,6 +21,17 @@ spec:
       annotations:
         checksum/config: {{ include (print .Template.BasePath "/configmap-deerflow.yaml") . | sha256sum }}
     spec:
+      initContainers:
+        - name: copy-extensions-config
+          image: busybox
+          command: ["sh", "-c", "[ -f /writable-config/extensions_config.json ] || echo '{\"mcpServers\":{},\"skills\":{}}' > /writable-config/extensions_config.json"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          volumeMounts:
+            - name: deer-flow-home
+              mountPath: /writable-config
       containers:
         - name: gateway
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -61,11 +72,10 @@ spec:
             - name: config
               mountPath: /app/backend/config.yaml
               subPath: config.yaml
-              readOnly: false
-            - name: config
+              readOnly: true
+            - name: deer-flow-home
               mountPath: /app/backend/extensions_config.json
               subPath: extensions_config.json
-              readOnly: false
             - name: deer-flow-home
               mountPath: /app/backend/.deer-flow
             - name: deer-flow-home

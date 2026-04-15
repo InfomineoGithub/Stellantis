@@ -99,8 +99,3 @@ data:
       type: {{ .Values.checkpointer.type }}
       connection_string: {{ .Values.checkpointer.connectionString }}
 
-  extensions_config.json: |
-    {
-      "mcpServers": {},
-      "skills": {}
-    }
