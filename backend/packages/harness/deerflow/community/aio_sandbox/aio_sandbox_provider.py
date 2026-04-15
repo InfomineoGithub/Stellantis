@@ -80,6 +80,9 @@ class AioSandboxProvider(SandboxProvider):
         # Containers here can be reclaimed quickly (no cold-start) or destroyed
         # when replicas capacity is exhausted.
         self._warm_pool: dict[str, tuple[SandboxInfo, float]] = {}
+        self._ref_counts: dict[str, int] = {}  # sandbox_id → active holder count
+        self._slot_counts: dict[str, int] = {}  # sandbox_id → threads assigned (for max_threads_per_sandbox)
+        self._prewarm_pool: dict[str, tuple[SandboxInfo, float]] = {}  # pre-warmed ready containers
         self._shutdown_called = False
         self._idle_checker_stop = threading.Event()
         self._idle_checker_thread: threading.Thread | None = None
@@ -95,7 +98,10 @@ class AioSandboxProvider(SandboxProvider):
         if self._config.get("idle_timeout", DEFAULT_IDLE_TIMEOUT) > 0:
             self._start_idle_checker()
 
-    # ── Factory methods ──────────────────────────────────────────────────
+        # Start pre-warm thread if enabled
+        self._start_prewarm()
+
+    # ── Internal state management ──────────────────────────────────────────────────
 
     def _create_backend(self) -> SandboxBackend:
         """Create the appropriate backend based on configuration.
@@ -295,6 +301,52 @@ class AioSandboxProvider(SandboxProvider):
             except Exception as e:
                 logger.error(f"Failed to destroy idle warm-pool sandbox {sandbox_id}: {e}")
 
+    # ── Pre-warm pool ────────────────────────────────────────────────────────
+
+    def _prewarm_one(self) -> None:
+        """Create one sandbox speculatively and park it in the pre-warm pool.
+
+        Uses thread_id=None so the provisioner backend creates a Pod without
+        thread-specific configuration. The Pod is claimed and re-keyed when
+        a thread calls acquire().
+        """
+        import uuid
+
+        sandbox_id = f"pw-{uuid.uuid4().hex[:8]}"
+        try:
+            info = self._backend.create(thread_id=None, sandbox_id=sandbox_id, extra_mounts=None)
+            if wait_for_sandbox_ready(info.sandbox_url, timeout=120):
+                with self._lock:
+                    self._prewarm_pool[sandbox_id] = (info, time.time())
+                logger.info(f"Pre-warmed sandbox {sandbox_id} ready at {info.sandbox_url}")
+            else:
+                self._backend.destroy(info)
+                logger.warning(f"Pre-warmed sandbox {sandbox_id} failed readiness check, destroyed")
+        except Exception as e:
+            logger.error(f"Failed to pre-warm sandbox: {e}")
+
+    def _prewarm_loop(self) -> None:
+        target = self._config.get("pre_warm_count", DEFAULT_PRE_WARM_COUNT)
+        while not self._idle_checker_stop.wait(timeout=5):
+            try:
+                with self._lock:
+                    current = len(self._prewarm_pool)
+                if current < target:
+                    self._prewarm_one()
+            except Exception as e:
+                logger.error(f"Pre-warm loop error: {e}")
+
+    def _start_prewarm(self) -> None:
+        count = self._config.get("pre_warm_count", DEFAULT_PRE_WARM_COUNT)
+        if count > 0:
+            self._prewarm_thread = threading.Thread(
+                target=self._prewarm_loop,
+                name="sandbox-prewarm",
+                daemon=True,
+            )
+            self._prewarm_thread.start()
+            logger.info(f"Started pre-warm thread (target pool size: {count})")
+
     # ── Signal handling ──────────────────────────────────────────────────
 
     def _register_signal_handlers(self) -> None:
@@ -325,6 +377,22 @@ class AioSandboxProvider(SandboxProvider):
             if thread_id not in self._thread_locks:
                 self._thread_locks[thread_id] = threading.Lock()
             return self._thread_locks[thread_id]
+
+    def hold(self, sandbox_id: str) -> None:
+        """Increment the ref count for an active sandbox without a full acquire.
+
+        Call this when a subagent is about to use an inherited sandbox so the
+        sandbox is not moved to the warm pool while the subagent is running.
+        The matching release() call (from SandboxMiddleware.after_agent) will
+        decrement the ref count.
+
+        No-op if sandbox_id is not currently active.
+        """
+        with self._lock:
+            if sandbox_id not in self._sandboxes:
+                return
+            self._ref_counts[sandbox_id] = self._ref_counts.get(sandbox_id, 0) + 1
+            logger.debug(f"Sandbox {sandbox_id} ref count held → {self._ref_counts[sandbox_id]}")
 
     # ── Core: acquire / get / release / shutdown ─────────────────────────
 
@@ -366,12 +434,28 @@ class AioSandboxProvider(SandboxProvider):
                     if existing_id in self._sandboxes:
                         logger.info(f"Reusing in-process sandbox {existing_id} for thread {thread_id}")
                         self._last_activity[existing_id] = time.time()
+                        self._ref_counts[existing_id] = self._ref_counts.get(existing_id, 0) + 1
                         return existing_id
                     else:
                         del self._thread_sandboxes[thread_id]
 
         # Deterministic ID for thread-specific, random for anonymous
         sandbox_id = self._deterministic_sandbox_id(thread_id) if thread_id else str(uuid.uuid4())[:8]
+
+        # ── Layer 1.2: Multi-thread slot sharing ──
+        if thread_id:
+            shared_id = self._find_available_slot()
+            if shared_id is not None:
+                with self._lock:
+                    # Re-verify under lock (another thread may have filled the slot)
+                    max_slots = self._config.get("max_threads_per_sandbox", DEFAULT_MAX_THREADS_PER_SANDBOX)
+                    if self._slot_counts.get(shared_id, 0) < max_slots and shared_id in self._sandboxes:
+                        self._slot_counts[shared_id] = self._slot_counts.get(shared_id, 0) + 1
+                        self._ref_counts[shared_id] = self._ref_counts.get(shared_id, 0) + 1
+                        self._thread_sandboxes[thread_id] = shared_id
+                        self._last_activity[shared_id] = time.time()
+                        logger.info(f"Thread {thread_id} joined shared sandbox {shared_id} (slots: {self._slot_counts[shared_id]}/{max_slots})")
+                        return shared_id
 
         # ── Layer 1.5: Warm pool (container still running, no cold-start) ──
         if thread_id:
@@ -382,9 +466,26 @@ class AioSandboxProvider(SandboxProvider):
                     self._sandboxes[sandbox_id] = sandbox
                     self._sandbox_infos[sandbox_id] = info
                     self._last_activity[sandbox_id] = time.time()
+                    self._ref_counts[sandbox_id] = self._ref_counts.get(sandbox_id, 0) + 1
                     self._thread_sandboxes[thread_id] = sandbox_id
                     logger.info(f"Reclaimed warm-pool sandbox {sandbox_id} for thread {thread_id} at {info.sandbox_url}")
                     return sandbox_id
+
+        # ── Layer 1.75: Pre-warm pool (hot spare, no cold-start) ──
+        if thread_id:
+            with self._lock:
+                if self._prewarm_pool:
+                    # Claim the oldest pre-warmed sandbox
+                    oldest_pw_id = min(self._prewarm_pool, key=lambda sid: self._prewarm_pool[sid][1])
+                    info, _ = self._prewarm_pool.pop(oldest_pw_id)
+                    sandbox = AioSandbox(id=oldest_pw_id, base_url=info.sandbox_url)
+                    self._sandboxes[oldest_pw_id] = sandbox
+                    self._sandbox_infos[oldest_pw_id] = info
+                    self._last_activity[oldest_pw_id] = time.time()
+                    self._ref_counts[oldest_pw_id] = 1
+                    self._thread_sandboxes[thread_id] = oldest_pw_id
+                    logger.info(f"Thread {thread_id} claimed pre-warmed sandbox {oldest_pw_id} at {info.sandbox_url}")
+                    return oldest_pw_id
 
         # ── Layer 2: Backend discovery + create (protected by cross-process lock) ──
         # Use a file lock so that two processes racing to create the same sandbox
@@ -435,6 +536,7 @@ class AioSandboxProvider(SandboxProvider):
                         self._sandboxes[discovered.sandbox_id] = sandbox
                         self._sandbox_infos[discovered.sandbox_id] = discovered
                         self._last_activity[discovered.sandbox_id] = time.time()
+                        self._ref_counts[discovered.sandbox_id] = self._ref_counts.get(discovered.sandbox_id, 0) + 1
                         self._thread_sandboxes[thread_id] = discovered.sandbox_id
                     logger.info(f"Discovered existing sandbox {discovered.sandbox_id} for thread {thread_id} at {discovered.sandbox_url}")
                     return discovered.sandbox_id
@@ -443,25 +545,34 @@ class AioSandboxProvider(SandboxProvider):
             finally:
                 fcntl.flock(lock_file, fcntl.LOCK_UN)
 
-    def _evict_oldest_warm(self) -> str | None:
-        """Destroy the oldest container in the warm pool to free capacity.
-
-        Returns:
-            The evicted sandbox_id, or None if warm pool is empty.
-        """
+    def _evict_oldest_warm(self) -> None:
+        """Destroy the oldest warm pool sandbox to make room for a new one."""
         with self._lock:
             if not self._warm_pool:
-                return None
+                return
             oldest_id = min(self._warm_pool, key=lambda sid: self._warm_pool[sid][1])
             info, _ = self._warm_pool.pop(oldest_id)
 
         try:
             self._backend.destroy(info)
-            logger.info(f"Destroyed warm-pool sandbox {oldest_id}")
+            logger.info(f"Evicted oldest warm pool sandbox {oldest_id}")
         except Exception as e:
-            logger.error(f"Failed to destroy warm-pool sandbox {oldest_id}: {e}")
+            logger.error(f"Failed to destroy evicted warm pool sandbox {oldest_id}: {e}")
+
+    def _find_available_slot(self) -> str | None:
+        """Find an active sandbox with a free slot for multi-thread sharing.
+
+        Returns the sandbox_id of the first active sandbox whose slot count is
+        below max_threads_per_sandbox, or None if all are full (or sharing is disabled).
+        """
+        max_slots = self._config.get("max_threads_per_sandbox", DEFAULT_MAX_THREADS_PER_SANDBOX)
+        if max_slots <= 1:
             return None
-        return oldest_id
+        with self._lock:
+            for sid, slot_count in self._slot_counts.items():
+                if slot_count < max_slots and sid in self._sandboxes:
+                    return sid
+        return None
 
     def _create_sandbox(self, thread_id: str | None, sandbox_id: str) -> str:
         """Create a new sandbox via the backend.
@@ -484,14 +595,7 @@ class AioSandboxProvider(SandboxProvider):
         with self._lock:
             total = len(self._sandboxes) + len(self._warm_pool)
         if total >= replicas:
-            evicted = self._evict_oldest_warm()
-            if evicted:
-                logger.info(f"Evicted warm-pool sandbox {evicted} to stay within replicas={replicas}")
-            else:
-                # All slots are occupied by active sandboxes — proceed anyway and log.
-                # The replicas limit is a soft cap; we never forcibly stop a container
-                # that is actively serving a thread.
-                logger.warning(f"All {replicas} replica slots are in active use; creating sandbox {sandbox_id} beyond the soft limit")
+            self._evict_oldest_warm()
 
         info = self._backend.create(thread_id, sandbox_id, extra_mounts=extra_mounts or None)
 
@@ -505,6 +609,8 @@ class AioSandboxProvider(SandboxProvider):
             self._sandboxes[sandbox_id] = sandbox
             self._sandbox_infos[sandbox_id] = info
             self._last_activity[sandbox_id] = time.time()
+            self._ref_counts[sandbox_id] = self._ref_counts.get(sandbox_id, 0) + 1
+            self._slot_counts[sandbox_id] = self._slot_counts.get(sandbox_id, 0) + 1
             if thread_id:
                 self._thread_sandboxes[thread_id] = sandbox_id
 
@@ -527,26 +633,28 @@ class AioSandboxProvider(SandboxProvider):
             return sandbox
 
     def release(self, sandbox_id: str) -> None:
-        """Release a sandbox from active use into the warm pool.
+        """Release a sandbox from active use.
 
-        The container is kept running so it can be reclaimed quickly by the same
-        thread on its next turn without a cold-start.  The container will only be
-        stopped when the replicas limit forces eviction or during shutdown.
-
-        Args:
-            sandbox_id: The ID of the sandbox to release.
+        Decrements the ref count. Only moves the sandbox to the warm pool
+        when the ref count reaches zero, which means no subagents are still
+        holding a reference to this sandbox.
         """
-        info = None
-        thread_ids_to_remove: list[str] = []
-
         with self._lock:
+            count = self._ref_counts.get(sandbox_id, 0)
+            if count > 1:
+                self._ref_counts[sandbox_id] = count - 1
+                logger.info(f"Sandbox {sandbox_id} ref count decremented to {count - 1}, keeping active")
+                return
+            # Count is 0 or 1 — proceed with actual release to warm pool
+            self._ref_counts.pop(sandbox_id, None)
+
             self._sandboxes.pop(sandbox_id, None)
             info = self._sandbox_infos.pop(sandbox_id, None)
             thread_ids_to_remove = [tid for tid, sid in self._thread_sandboxes.items() if sid == sandbox_id]
             for tid in thread_ids_to_remove:
                 del self._thread_sandboxes[tid]
             self._last_activity.pop(sandbox_id, None)
-            # Park in warm pool — container keeps running
+            self._slot_counts.pop(sandbox_id, None)
             if info and sandbox_id not in self._warm_pool:
                 self._warm_pool[sandbox_id] = (info, time.time())
 
@@ -588,16 +696,21 @@ class AioSandboxProvider(SandboxProvider):
                 return
             self._shutdown_called = True
             sandbox_ids = list(self._sandboxes.keys())
-            warm_items = list(self._warm_pool.items())
-            self._warm_pool.clear()
 
         # Stop idle checker
         self._idle_checker_stop.set()
-        if self._idle_checker_thread is not None and self._idle_checker_thread.is_alive():
-            self._idle_checker_thread.join(timeout=5)
-            logger.info("Stopped idle checker thread")
+        if self._idle_checker_thread:
+            self._idle_checker_thread.join(timeout=2.0)
+        if self._prewarm_thread:
+            self._prewarm_thread.join(timeout=2.0)
 
-        logger.info(f"Shutting down {len(sandbox_ids)} active + {len(warm_items)} warm-pool sandbox(es)")
+        with self._lock:
+            warm_items = list(self._warm_pool.items())
+            self._warm_pool.clear()
+            prewarm_items = list(self._prewarm_pool.items())
+            self._prewarm_pool.clear()
+
+        logger.info(f"Shutting down {len(sandbox_ids)} active + {len(warm_items)} warm-pool + {len(prewarm_items)} pre-warm sandbox(es)")
 
         for sandbox_id in sandbox_ids:
             try:
@@ -605,9 +718,17 @@ class AioSandboxProvider(SandboxProvider):
             except Exception as e:
                 logger.error(f"Failed to destroy sandbox {sandbox_id} during shutdown: {e}")
 
+        # Destroy warm & prewarm pool sandboxes outside the lock
         for sandbox_id, (info, _) in warm_items:
             try:
                 self._backend.destroy(info)
-                logger.info(f"Destroyed warm-pool sandbox {sandbox_id} during shutdown")
+                logger.info(f"Destroyed warm-pooled sandbox {sandbox_id} during shutdown")
             except Exception as e:
-                logger.error(f"Failed to destroy warm-pool sandbox {sandbox_id} during shutdown: {e}")
+                logger.error(f"Failed to destroy warm-pooled sandbox {sandbox_id} during shutdown: {e}")
+
+        for sandbox_id, (info, _) in prewarm_items:
+            try:
+                self._backend.destroy(info)
+                logger.info(f"Destroyed pre-warmed sandbox {sandbox_id} during shutdown")
+            except Exception as e:
+                logger.error(f"Failed to destroy pre-warmed sandbox {sandbox_id} during shutdown: {e}")
