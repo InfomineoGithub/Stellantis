@@ -12,6 +12,7 @@ from langgraph.typing import ContextT
 
 from deerflow.agents.lead_agent.prompt import get_skills_prompt_section
 from deerflow.agents.thread_state import ThreadState
+from deerflow.sandbox.sandbox_provider import get_sandbox_provider
 from deerflow.subagents import SubagentExecutor, get_subagent_config
 from deerflow.subagents.executor import SubagentStatus, cleanup_background_task, get_background_task_result
 
@@ -111,6 +112,16 @@ def task_tool(
         thread_id=thread_id,
         trace_id=trace_id,
     )
+
+    # Hold the sandbox ref count so the sandbox stays active while the
+    # subagent runs in the background. SandboxMiddleware.after_agent in the
+    # subagent will call release(), which decrements the count.
+    if sandbox_state is not None:
+        sandbox_id_to_hold = sandbox_state.get("sandbox_id")
+        if sandbox_id_to_hold:
+            provider = get_sandbox_provider()
+            if hasattr(provider, "hold"):
+                provider.hold(sandbox_id_to_hold)
 
     # Start background execution (always async to prevent blocking)
     # Use tool_call_id as task_id for better traceability
