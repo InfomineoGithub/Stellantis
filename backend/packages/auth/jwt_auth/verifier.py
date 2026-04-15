@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 from typing import Any
 
 import jwt
@@ -43,6 +44,12 @@ def _jwks_url() -> str:
     return f"{base}/api/auth/jwks"
 
 
+@lru_cache(maxsize=1)
+def _get_jwks_client(url: str) -> PyJWKClient:
+    """Return a cached PyJWKClient for the given URL."""
+    return PyJWKClient(url, cache_keys=True)
+
+
 def _try_jwks(token: str) -> dict[str, Any]:
     """Verify an asymmetric JWT (EdDSA / ES256 / RS256) via JWKS.
 
@@ -50,8 +57,9 @@ def _try_jwks(token: str) -> dict[str, Any]:
     """
     jwks_url = _jwks_url()
     try:
-        # PyJWKClient fetches and caches the JWKS automatically
-        jwks_client = PyJWKClient(jwks_url, cache_keys=True)
+        # Fetching the PyJWKClient from a cache ensures that
+        # `cache_keys=True` actually persists across multiple verifications.
+        jwks_client = _get_jwks_client(jwks_url)
         signing_key = jwks_client.get_signing_key_from_jwt(token)
         payload = jwt.decode(
             token,

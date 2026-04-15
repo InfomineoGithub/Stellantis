@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from pathlib import Path
 
 import yaml
 
-from deerflow.config.app_config import AppConfig
+from deerflow.config.app_config import AppConfig, get_app_config, reset_app_config
 
 
 def _make_config_files(tmpdir: Path, user_config: dict, example_config: dict) -> Path:
@@ -123,3 +124,66 @@ def test_newer_user_version_no_warning(caplog):
                 config_path,
             )
         assert "outdated" not in caplog.text
+
+
+def test_get_app_config_reloads_when_config_yaml_changes(monkeypatch):
+    """Cached config should refresh when config.yaml is edited on disk."""
+    original_cwd = Path.cwd()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        config_path = _make_config_files(
+            tmpdir_path,
+            user_config={
+                "models": [
+                    {
+                        "name": "gpt-5.4",
+                        "display_name": "GPT-5.4",
+                        "use": "langchain_openai:ChatOpenAI",
+                        "model": "gpt-5.4",
+                        "api_key": "test-key",
+                        "supports_thinking": False,
+                        "supports_reasoning_effort": False,
+                    }
+                ],
+            },
+            example_config={"config_version": 1},
+        )
+
+        monkeypatch.chdir(tmpdir_path)
+        reset_app_config()
+
+        initial = get_app_config()
+        assert initial.models[0].supports_thinking is False
+        assert initial.models[0].supports_reasoning_effort is False
+
+        updated_config = {
+            "sandbox": {"use": "deerflow.sandbox.local:LocalSandboxProvider"},
+            "models": [
+                {
+                    "name": "gpt-5.4",
+                    "display_name": "GPT-5.4",
+                    "use": "langchain_openai:ChatOpenAI",
+                    "model": "gpt-5.4",
+                    "api_key": "test-key",
+                    "supports_thinking": True,
+                    "supports_reasoning_effort": True,
+                }
+            ],
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(updated_config, f)
+
+        stat = config_path.stat()
+        os.utime(config_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+
+        reloaded = get_app_config()
+        assert reloaded.models[0].supports_thinking is True
+        assert reloaded.models[0].supports_reasoning_effort is True
+
+        reset_app_config()
+        # Restore CWD before the TemporaryDirectory context manager cleans up.
+        # On Windows, deleting a directory while it is the process CWD raises
+        # WinError 32 (file in use), because monkeypatch only restores CWD
+        # after the test function returns — after this with-block has already
+        # attempted cleanup.
+        os.chdir(original_cwd)

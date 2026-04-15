@@ -458,5 +458,93 @@ No `other` value in any enum. Enums are extended by adding new members in future
 
 ---
 
+---
+
+## ADR-014: JWT Bearer Tokens as the Identity Transport Between Frontend and Backend Services
+
+**Status:** Accepted
+**Date:** 2026-04-06
+
+### Context
+
+DeerFlow 2.0 runs as three independent services behind an Nginx reverse proxy: the Next.js frontend (port 3000), the Gateway API (FastAPI, port 8001), and the LangGraph agent runtime (port 2024). Users authenticate exclusively via Google OAuth — email/password is disabled. There is no RBAC; any authenticated user can access all endpoints.
+
+The question is how the frontend proves the caller's identity to the backend services after authentication. Two viable approaches exist:
+
+1. **Cookie-forwarding (session proxy):** The browser sends the Better Auth session cookie to the backend. The backend makes a network call to Next.js to exchange the cookie for identity claims on every request.
+2. **JWT bearer tokens:** Better Auth issues a short-lived signed JWT. The frontend caches it and attaches it as `Authorization: Bearer <token>` on every request. The backend validates the signature locally using a shared secret.
+
+### Decision
+
+Use **short-lived JWT bearer tokens** (HS256, signed by `BETTER_AUTH_SECRET`) as the identity transport.
+
+Better Auth's `jwt()` plugin exposes `/api/auth/token`. The frontend's `fetchWithAuth` calls this endpoint when a valid session cookie exists, caches the returned JWT for 14 minutes (token TTL is 15 minutes), and attaches it as an `Authorization: Bearer <token>` header on all requests to the Gateway API and LangGraph server.
+
+Both backend services validate the token using the shared `verify_jwt()` function from the `stellantis-auth` package:
+
+```
+Strategy: Try HS256 with BETTER_AUTH_SECRET (fast, no network) →
+          Fall back to JWKS at /api/auth/jwks (asymmetric, for future key rotation)
+```
+
+The Gateway injects the validated payload via `Depends(get_current_user)`. LangGraph registers `@auth.authenticate` in `langgraph.json`. Both share the same `verify_jwt()` implementation.
+
+A `BYPASS_AUTH=true` environment variable skips validation in local development. This flag is checked at runtime in both services.
+
+### Alternatives considered
+
+- **Cookie-forwarding (session proxy):** The browser sends the session cookie; backends call Next.js `/api/auth/token` (or a custom introspection endpoint) on every request to resolve identity. Rejected because: it creates a hard runtime dependency from every backend service to the Next.js server on every authenticated request; LangGraph's `@auth.authenticate` hook has no standard HTTP client; and it prevents horizontal scaling of backends without sticky sessions or a shared Next.js session store.
+
+- **Asymmetric JWT (RS256 / EdDSA via JWKS only):** Eliminates the shared-secret coordination problem — backends fetch the public key from the JWKS endpoint without knowing the private key. Not chosen as the primary strategy because it introduces a network round-trip for key discovery and requires asymmetric key infrastructure. The JWKS fallback is already implemented in `verifier.py` and can be promoted to the primary strategy without changing callers.
+
+### Consequences
+
+- **Positive:** Validation is stateless and network-free (HS256 path). Both backend services use the same `verify_jwt()` call — adding a new service requires only sharing `BETTER_AUTH_SECRET`. Token caching in the frontend (14-min TTL, 15-min token) keeps round-trips to `/api/auth/token` minimal.
+- **Negative:** `BETTER_AUTH_SECRET` must be consistent across all services — rotating it invalidates all live tokens immediately. No revocation before expiry: if a user's Google account is suspended, existing JWTs remain valid for up to 15 minutes (acceptable without RBAC).
+- **Accepted trade-off:** The 15-minute expiry window on non-revocable tokens is acceptable at this stage. Rotation risk is mitigated by deploying all services in a single coordinated step. If revocation or finer-grained control is needed in a later phase, the JWKS path supports key rotation without changing the validation interface.
+- **Key files:**
+  - Token fetch and 14-min cache: `frontend/src/core/api/auth-fetch.ts`
+  - LangGraph client header injection: `frontend/src/core/api/api-client.ts`
+  - Better Auth config (`jwt()` plugin): `frontend/src/server/better-auth/config.ts`
+  - Shared JWT verifier (HS256 + JWKS): `backend/packages/auth/jwt_auth/verifier.py`
+  - Gateway dependency: `backend/app/gateway/dependencies.py`
+  - LangGraph auth hook: `backend/src/auth.py`
+
+---
+
+## ADR-015: Mtime-Based Config Cache Invalidation Without a File Watcher
+
+**Status:** Accepted
+**Date:** 2026-04-14
+
+### Context
+
+`get_app_config()` returns a cached singleton so the config file is not re-parsed on every API request. During development the config file changes frequently (model keys, tool toggles, sandbox settings) and the previous implementation never reloaded — the server had to be restarted to pick up changes.
+
+Two approaches exist for detecting file changes:
+
+1. **File-watcher daemon** (watchfiles, watchdog): A background thread/process watches the filesystem for inotify/FSEvents/ReadDirectoryChangesW events and signals the application to reload.
+2. **Mtime polling on access**: Each call to `get_app_config()` reads the file's `st_mtime_ns` and compares it to the cached value. If different, the config is reloaded before returning.
+
+### Decision
+
+Use **mtime polling on access** (`Path.stat().st_mtime_ns` comparison on every `get_app_config()` call). No file-watcher dependency is added.
+
+The cache stores three globals: `_app_config`, `_app_config_path`, and `_app_config_mtime_ns`. All three are cleared together by `reset_app_config()` and updated atomically on reload. If the path or mtime has changed since the last read, the config is reloaded transparently.
+
+### Alternatives considered
+
+- **File-watcher daemon (watchfiles):** Already in the dependency tree (LangGraph uses it for hot-reload). Would push reload to a background thread rather than the hot path of each request. Adds complexity: thread lifecycle, synchronisation, and platform-specific behaviour (FSEvents vs inotify vs ReadDirectoryChangesW). On Windows the watcher holds a directory handle that prevents `TemporaryDirectory` cleanup in tests. Rejected: the polling cost is negligible for a config that changes only during development.
+
+- **Explicit `reload_app_config()` call required:** Force callers to call `reload_app_config()` whenever they know the file changed. Simpler internally but requires coordination — the Gateway API would need to reload on every mutating request and the LangGraph server would need its own reload path. Rejected: error-prone and inconsistent.
+
+### Consequences
+
+- **Positive:** Config changes are picked up automatically by the next API call — no restart required. No new dependency. The cache is always coherent: path, mtime, and the config object are updated together.
+- **Negative:** Every `get_app_config()` call does one `stat()` syscall. Acceptable — `stat()` is a fast VFS call and config is read only on the critical path for agent initialisation, not on every token produced.
+- **Key files:** `backend/packages/harness/deerflow/config/app_config.py` (`get_app_config`, `reload_app_config`, `reset_app_config`, `_read_config_cache_metadata`)
+
+---
+
 *ADRs.md — Phase 1: Business Domain Integration*
 *Created: 2026-04-05*
