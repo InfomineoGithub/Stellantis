@@ -195,6 +195,10 @@ class CreateSandboxRequest(BaseModel):
     thread_id: str
 
 
+class ReassignSandboxRequest(BaseModel):
+    new_thread_id: str
+
+
 class SandboxResponse(BaseModel):
     sandbox_id: str
     sandbox_url: str  # Direct access URL, e.g. http://host.docker.internal:{NodePort}
@@ -228,6 +232,7 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
             labels={
                 "app": "deer-flow-sandbox",
                 "sandbox-id": sandbox_id,
+                "thread-id": thread_id,
                 "app.kubernetes.io/name": "deer-flow",
                 "app.kubernetes.io/component": "sandbox",
             },
@@ -282,9 +287,7 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
                             name="shared-data" if SANDBOX_PVC_NAME else "skills",
                             mount_path="/mnt/skills",
                             read_only=True,
-                            sub_path="skills"
-                            if SANDBOX_PVC_NAME
-                            else None,
+                            sub_path="skills" if SANDBOX_PVC_NAME else None,
                         ),
                         k8s_client.V1VolumeMount(
                             name="shared-data" if SANDBOX_PVC_NAME else "user-data",
@@ -536,3 +539,68 @@ async def list_sandboxes():
             )
 
     return {"sandboxes": sandboxes, "count": len(sandboxes)}
+
+
+@app.patch("/api/sandboxes/{sandbox_id}/reassign")
+async def reassign_sandbox(sandbox_id: str, req: ReassignSandboxRequest):
+    """Rename the thread hostPath directory so the bind mount tracks the real thread.
+
+    Only supported in hostPath mode (SANDBOX_PVC_NAME must be empty).
+    The provisioner mounts THREADS_HOST_PATH so it can rename directories directly.
+    """
+    if SANDBOX_PVC_NAME:
+        raise HTTPException(
+            status_code=400,
+            detail="Sandbox reassign is not supported in PVC mode (hostPath only).",
+        )
+
+    # Read the current thread-id label from the pod to find the old directory
+    try:
+        pod = core_v1.read_namespaced_pod(_pod_name(sandbox_id), K8S_NAMESPACE)
+    except ApiException as exc:
+        if exc.status == 404:
+            raise HTTPException(
+                status_code=404, detail=f"Sandbox '{sandbox_id}' not found"
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to read pod: {exc.reason}")
+
+    old_thread_id = (pod.metadata.labels or {}).get("thread-id")
+    if not old_thread_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Pod has no thread-id label; cannot determine source path.",
+        )
+
+    new_thread_id = req.new_thread_id
+    if old_thread_id == new_thread_id:
+        return {"ok": True, "sandbox_id": sandbox_id, "thread_id": new_thread_id}
+
+    # Rename on the host filesystem (provisioner container must have THREADS_HOST_PATH mounted)
+    src = os.path.join(THREADS_HOST_PATH, old_thread_id)
+    dst = os.path.join(THREADS_HOST_PATH, new_thread_id)
+    try:
+        if os.path.exists(src) and not os.path.exists(dst):
+            os.rename(src, dst)
+            logger.info(f"Renamed thread dir {src} → {dst} for sandbox {sandbox_id}")
+        elif os.path.exists(dst):
+            logger.warning(
+                f"Destination thread dir already exists, skipping rename: {dst}"
+            )
+        else:
+            logger.warning(f"Source thread dir not found: {src}")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to rename thread directory: {exc}"
+        )
+
+    # Update the pod's thread-id label
+    try:
+        core_v1.patch_namespaced_pod(
+            _pod_name(sandbox_id),
+            K8S_NAMESPACE,
+            {"metadata": {"labels": {"thread-id": new_thread_id}}},
+        )
+    except ApiException as exc:
+        logger.warning(f"Failed to update thread-id label on pod {sandbox_id}: {exc}")
+
+    return {"ok": True, "sandbox_id": sandbox_id, "thread_id": new_thread_id}

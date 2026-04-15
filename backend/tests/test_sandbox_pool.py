@@ -1,11 +1,10 @@
-"""Tests for sandbox pool sharing: ref counting, pre-warm, slot-based acquisition."""
+"""Tests for sandbox pool: ref counting, pre-warm with thread-dir structure, reactive warmup."""
 
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
 from deerflow.community.aio_sandbox.aio_sandbox_provider import (
-    DEFAULT_MAX_THREADS_PER_SANDBOX,
     DEFAULT_PRE_WARM_COUNT,
     AioSandboxProvider,
 )
@@ -34,7 +33,7 @@ def make_provider(backend: MagicMock, **config_overrides) -> AioSandboxProvider:
     p._warm_pool = {}
     p._prewarm_pool = {}
     p._ref_counts = {}
-    p._slot_counts = {}
+    p._sandbox_placeholder = {}
     p._shutdown_called = False
     p._idle_checker_stop = threading.Event()
     p._idle_checker_thread = None
@@ -49,11 +48,20 @@ def make_provider(backend: MagicMock, **config_overrides) -> AioSandboxProvider:
         "environment": {},
         "provisioner_url": "",
         "pre_warm_count": DEFAULT_PRE_WARM_COUNT,
-        "max_threads_per_sandbox": DEFAULT_MAX_THREADS_PER_SANDBOX,
     }
     p._config.update(config_overrides)
     p._backend = backend
     return p
+
+
+def _setup_active_sandbox(p: AioSandboxProvider, sandbox_id: str, thread_id: str, url: str = "http://localhost:9010") -> None:
+    """Helper: inject a live sandbox into a provider as if it was acquired."""
+    info = SandboxInfo(sandbox_id=sandbox_id, sandbox_url=url)
+    p._sandboxes[sandbox_id] = MagicMock()
+    p._sandbox_infos[sandbox_id] = info
+    p._thread_sandboxes[thread_id] = sandbox_id
+    p._last_activity[sandbox_id] = time.time()
+    p._ref_counts[sandbox_id] = 1
 
 
 # ── Config defaults ───────────────────────────────────────────────────────────
@@ -61,10 +69,6 @@ def make_provider(backend: MagicMock, **config_overrides) -> AioSandboxProvider:
 
 def test_default_pre_warm_count():
     assert DEFAULT_PRE_WARM_COUNT == 0
-
-
-def test_default_max_threads_per_sandbox():
-    assert DEFAULT_MAX_THREADS_PER_SANDBOX == 1
 
 
 # ── Ref counting ──────────────────────────────────────────────────────────────
@@ -119,20 +123,95 @@ def test_release_moves_to_warm_pool_when_ref_count_reaches_zero():
     assert p._ref_counts.get("abc12345") is None
 
 
-# ── Pre-warm pool ─────────────────────────────────────────────────────────────
+# ── One sandbox per agent (no slot sharing) ───────────────────────────────────
 
 
-def test_prewarm_one_adds_to_prewarm_pool():
+def test_each_thread_gets_dedicated_sandbox():
+    """Two different threads must never share a sandbox."""
+    backend = make_mock_backend()
+    backend.create.side_effect = [
+        SandboxInfo(sandbox_id="box-1", sandbox_url="http://localhost:9010"),
+        SandboxInfo(sandbox_id="box-2", sandbox_url="http://localhost:9011"),
+    ]
+    p = make_provider(backend)
+
+    with (
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True),
+        patch.object(AioSandboxProvider, "_get_extra_mounts", return_value=[]),
+        patch.object(AioSandboxProvider, "_trigger_warmup_if_needed"),
+        patch.object(AioSandboxProvider, "_discover_or_create_with_lock", side_effect=lambda thread_id, sandbox_id: p._create_sandbox(thread_id, sandbox_id)),
+    ):
+        sid1 = p.acquire("thread-1")
+        sid2 = p.acquire("thread-2")
+
+    assert sid1 != sid2
+    assert backend.create.call_count == 2
+
+
+# ── Pre-warm pool: 3-tuple (info, placeholder_thread_id, timestamp) ───────────
+
+
+def test_prewarm_one_adds_to_prewarm_pool_with_placeholder():
+    """_prewarm_one must store a 3-tuple (info, placeholder_thread_id, ts)."""
     backend = make_mock_backend()
     backend.create.return_value = SandboxInfo(sandbox_id="pw-aabbccdd", sandbox_url="http://localhost:9001")
     p = make_provider(backend)
 
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True):
+    with (
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True),
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths,
+        patch.object(AioSandboxProvider, "_get_skills_mount", return_value=None),
+    ):
+        mock_paths.return_value.thread_dir.return_value = MagicMock()
+        mock_paths.return_value.ensure_thread_dirs.return_value = None
+        mock_paths.return_value.host_base_dir = MagicMock()
         p._prewarm_one()
 
     assert len(p._prewarm_pool) == 1
     sid = next(iter(p._prewarm_pool))
-    assert p._prewarm_pool[sid][0].sandbox_url == "http://localhost:9001"
+    info, placeholder_thread_id, ts = p._prewarm_pool[sid]
+    assert info.sandbox_url == "http://localhost:9001"
+    assert placeholder_thread_id.startswith("prewarm-")
+    assert ts > 0
+
+
+def test_prewarm_one_uses_thread_dir_structure(tmp_path):
+    """_prewarm_one must create dirs under threads/{placeholder}/user-data/, not prewarm/."""
+    from deerflow.community.aio_sandbox.local_backend import LocalContainerBackend
+    from deerflow.config.paths import Paths
+
+    local_backend = MagicMock(spec=LocalContainerBackend)
+    local_backend.is_alive.return_value = True
+    p = make_provider(local_backend)
+    p._backend = local_backend
+
+    real_paths = Paths(base_dir=tmp_path)
+
+    def fake_create(thread_id, sandbox_id, extra_mounts=None):
+        return SandboxInfo(sandbox_id=sandbox_id, sandbox_url="http://localhost:9050")
+
+    local_backend.create.side_effect = fake_create
+
+    with (
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True),
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths", return_value=real_paths),
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.Paths", lambda base_dir: Paths(base_dir=base_dir)),
+        patch.object(AioSandboxProvider, "_get_skills_mount", return_value=None),
+    ):
+        p._prewarm_one()
+
+    assert len(p._prewarm_pool) == 1
+    sid = next(iter(p._prewarm_pool))
+    _info, placeholder_thread_id, _ts = p._prewarm_pool[sid]
+
+    assert placeholder_thread_id.startswith("prewarm-")
+    # Old-style prewarm/ dir must NOT exist
+    assert not (tmp_path / "prewarm").exists()
+    # Standard threads/{placeholder}/user-data/ structure must exist
+    thread_user_data = tmp_path / "threads" / placeholder_thread_id / "user-data"
+    assert (thread_user_data / "workspace").exists()
+    assert (thread_user_data / "uploads").exists()
+    assert (thread_user_data / "outputs").exists()
 
 
 def test_prewarm_one_destroys_sandbox_on_readiness_failure():
@@ -140,7 +219,14 @@ def test_prewarm_one_destroys_sandbox_on_readiness_failure():
     backend.create.return_value = SandboxInfo(sandbox_id="pw-fail", sandbox_url="http://localhost:9002")
     p = make_provider(backend)
 
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=False):
+    with (
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=False),
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths,
+        patch.object(AioSandboxProvider, "_get_skills_mount", return_value=None),
+    ):
+        mock_paths.return_value.thread_dir.return_value = MagicMock()
+        mock_paths.return_value.ensure_thread_dirs.return_value = None
+        mock_paths.return_value.host_base_dir = MagicMock()
         p._prewarm_one()
 
     backend.destroy.assert_called_once()
@@ -151,172 +237,230 @@ def test_acquire_claims_prewarmed_sandbox_without_cold_start():
     backend = make_mock_backend()
     p = make_provider(backend)
     prewarm_info = SandboxInfo(sandbox_id="pw-hotbox", sandbox_url="http://localhost:9003")
-    p._prewarm_pool["pw-hotbox"] = (prewarm_info, time.time())
+    # 3-tuple: (info, placeholder_thread_id, timestamp)
+    p._prewarm_pool["pw-hotbox"] = (prewarm_info, "prewarm-deadbeef", time.time())
 
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True), patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths:
+    with (
+        patch.object(AioSandboxProvider, "_migrate_prewarm_dirs"),
+        patch.object(AioSandboxProvider, "_trigger_warmup_if_needed"),
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths,
+    ):
         mock_paths.return_value.thread_dir.return_value = MagicMock()
         mock_paths.return_value.ensure_thread_dirs.return_value = None
         sid = p.acquire("thread-new")
 
     backend.create.assert_not_called()  # no cold start
-    assert sid is not None
+    assert sid == "pw-hotbox"
     assert sid in p._sandboxes
     assert len(p._prewarm_pool) == 0  # claimed from pool
 
 
-# ── Slot-based sharing ────────────────────────────────────────────────────────
-
-
-def _setup_active_sandbox(p: AioSandboxProvider, sandbox_id: str, thread_id: str, url: str = "http://localhost:9010") -> None:
-    """Helper: inject a live sandbox into a provider as if it was acquired."""
-    info = SandboxInfo(sandbox_id=sandbox_id, sandbox_url=url)
-    p._sandboxes[sandbox_id] = MagicMock()
-    p._sandbox_infos[sandbox_id] = info
-    p._thread_sandboxes[thread_id] = sandbox_id
-    p._last_activity[sandbox_id] = time.time()
-    p._ref_counts[sandbox_id] = 1
-    p._slot_counts[sandbox_id] = 1
-
-
-def test_second_thread_shares_sandbox_when_below_max_slots():
+def test_acquire_calls_migrate_on_prewarm_claim():
+    """Claiming a pre-warmed sandbox must call _migrate_prewarm_dirs."""
     backend = make_mock_backend()
-    p = make_provider(backend, max_threads_per_sandbox=2)
-    _setup_active_sandbox(p, "shared-box", "thread-1")
+    p = make_provider(backend)
+    prewarm_info = SandboxInfo(sandbox_id="pw-migrate", sandbox_url="http://localhost:9004")
+    p._prewarm_pool["pw-migrate"] = (prewarm_info, "prewarm-abc12345", time.time())
 
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths:
+    with (
+        patch.object(AioSandboxProvider, "_migrate_prewarm_dirs") as mock_migrate,
+        patch.object(AioSandboxProvider, "_trigger_warmup_if_needed"),
+        patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths,
+    ):
         mock_paths.return_value.thread_dir.return_value = MagicMock()
         mock_paths.return_value.ensure_thread_dirs.return_value = None
-        sid = p.acquire("thread-2")
+        p.acquire("thread-real")
 
-    assert sid == "shared-box"
-    assert p._slot_counts["shared-box"] == 2
-    assert p._ref_counts["shared-box"] == 2
+    mock_migrate.assert_called_once_with("prewarm-abc12345", "thread-real", "pw-migrate")
 
 
-def test_third_thread_gets_new_sandbox_when_max_slots_reached():
+# ── Cleanup of dead pre-warm containers ───────────────────────────────────────
+
+
+def test_cleanup_dead_prewarm_removes_dead_entries(tmp_path):
+    """Dead pre-warm pool entries must be removed and placeholder dirs cleaned up."""
+    from deerflow.config.paths import Paths
+
     backend = make_mock_backend()
-    backend.create.return_value = SandboxInfo(sandbox_id="new-box", sandbox_url="http://localhost:9011")
-    p = make_provider(backend, max_threads_per_sandbox=2)
-    _setup_active_sandbox(p, "shared-box", "thread-1")
-    # Simulate thread-2 already sharing shared-box
-    p._thread_sandboxes["thread-2"] = "shared-box"
-    p._slot_counts["shared-box"] = 2
-    p._ref_counts["shared-box"] = 2
-
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True), patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths:
-        mock_paths.return_value.thread_dir.return_value = MagicMock()
-        mock_paths.return_value.ensure_thread_dirs.return_value = None
-        sid = p.acquire("thread-3")
-
-    assert sid != "shared-box"  # got a different sandbox
-    backend.create.assert_called_once()
-
-
-def test_slot_count_decremented_on_release():
-    backend = make_mock_backend()
-    p = make_provider(backend, max_threads_per_sandbox=2)
-    _setup_active_sandbox(p, "shared-box", "thread-1")
-    p._slot_counts["shared-box"] = 2
-    p._ref_counts["shared-box"] = 2
-
-    p.release("shared-box")
-
-    # ref count went from 2 → 1, sandbox stays active
-    assert p._ref_counts.get("shared-box") == 1
-    assert "shared-box" in p._sandboxes
-
-
-# ── Pre-warm loop with active sandboxes ──────────────────────────────────────
-
-
-def test_prewarm_loop_skips_when_active_sandbox_exists():
-    """Pre-warm loop should not create replacement containers when
-    active sandboxes count toward the target."""
-    backend = make_mock_backend()
-    backend.create.return_value = SandboxInfo(sandbox_id="pw-new", sandbox_url="http://localhost:9020")
-    p = make_provider(backend, pre_warm_count=1)
-    # Simulate one active sandbox (pre-warmed one was claimed)
-    _setup_active_sandbox(p, "pw-claimed", "thread-1")
-
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True):
-        # Manually call the internal logic of _prewarm_loop (one iteration)
-        p._cleanup_dead_prewarm()
-        with p._lock:
-            current_prewarm = len(p._prewarm_pool)
-            current_active = len(p._sandboxes)
-
-    # 0 prewarm + 1 active >= 1 target → should NOT create replacement
-    assert current_prewarm + current_active >= 1
-    backend.create.assert_not_called()
-
-
-def test_prewarm_loop_creates_when_no_active_sandboxes():
-    """Pre-warm loop should create containers when total (prewarm + active)
-    is below the target."""
-    backend = make_mock_backend()
-    backend.create.return_value = SandboxInfo(sandbox_id="pw-fresh", sandbox_url="http://localhost:9021")
-    p = make_provider(backend, pre_warm_count=1)
-
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.wait_for_sandbox_ready", return_value=True):
-        p._prewarm_one()
-
-    assert len(p._prewarm_pool) == 1
-    backend.create.assert_called_once()
-
-
-# ── Pre-warm mounts for local backend ────────────────────────────────────────
-
-
-def test_prewarm_mounts_created_for_local_backend(tmp_path):
-    """Pre-warmed sandboxes with local backend should get writable
-    /mnt/user-data mounts via temporary host directories."""
-    from deerflow.community.aio_sandbox.local_backend import LocalContainerBackend
-
-    local_backend = MagicMock(spec=LocalContainerBackend)
-    local_backend.create.return_value = SandboxInfo(sandbox_id="pw-local", sandbox_url="http://localhost:9022")
-    local_backend.is_alive.return_value = True
-    p = make_provider(local_backend)
-    p._backend = local_backend  # ensure isinstance check passes
-
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths:
-        mock_paths.return_value.base_dir = tmp_path
-        mock_paths.return_value.host_base_dir = tmp_path
-        mounts = p._get_prewarm_mounts("pw-test123")
-
-    assert mounts is not None
-    assert len(mounts) >= 3  # workspace, uploads, outputs (+ optional skills)
-    container_paths = [m[1] for m in mounts]
-    assert "/mnt/user-data/workspace" in container_paths
-    assert "/mnt/user-data/uploads" in container_paths
-    assert "/mnt/user-data/outputs" in container_paths
-
-    # Verify host directories were created
-    assert (tmp_path / "prewarm" / "pw-test123" / "workspace").exists()
-    assert (tmp_path / "prewarm" / "pw-test123" / "uploads").exists()
-    assert (tmp_path / "prewarm" / "pw-test123" / "outputs").exists()
-
-
-def test_prewarm_mounts_none_for_remote_backend():
-    """Pre-warmed sandboxes with remote backend should not create mounts
-    (provisioner handles filesystem setup)."""
-    backend = make_mock_backend()  # MagicMock, not LocalContainerBackend
+    backend.is_alive.return_value = False
     p = make_provider(backend)
 
-    mounts = p._get_prewarm_mounts("pw-remote")
+    real_paths = Paths(base_dir=tmp_path)
+    placeholder = "prewarm-deadtest"
+    prewarm_info = SandboxInfo(sandbox_id="pw-dead", sandbox_url="http://localhost:9005")
+    p._prewarm_pool["pw-dead"] = (prewarm_info, placeholder, time.time())
 
-    assert mounts is None
+    placeholder_dir = real_paths.thread_dir(placeholder)
+    placeholder_dir.mkdir(parents=True, exist_ok=True)
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths", return_value=real_paths):
+        p._cleanup_dead_prewarm()
+
+    assert len(p._prewarm_pool) == 0
+    backend.destroy.assert_called_once_with(prewarm_info)
+    assert not placeholder_dir.exists()
 
 
-def test_cleanup_prewarm_dir(tmp_path):
-    """_cleanup_prewarm_dir should remove the temporary host directory."""
-    from deerflow.community.aio_sandbox.aio_sandbox_provider import AioSandboxProvider
+# ── Reactive warmup trigger ────────────────────────────────────────────────────
 
-    prewarm_dir = tmp_path / "prewarm" / "pw-cleanup"
-    prewarm_dir.mkdir(parents=True)
-    (prewarm_dir / "workspace").mkdir()
 
-    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths") as mock_paths:
-        mock_paths.return_value.base_dir = tmp_path
-        AioSandboxProvider._cleanup_prewarm_dir("pw-cleanup")
+def test_trigger_warmup_fires_when_below_replicas():
+    backend = make_mock_backend()
+    p = make_provider(backend, pre_warm_count=2, replicas=3)
+    _setup_active_sandbox(p, "box-1", "thread-1")
 
-    assert not prewarm_dir.exists()
+    fired = []
+
+    def fake_thread(*args, **kwargs):
+        t = MagicMock()
+        fired.append(kwargs.get("target") or (args[0] if args else None))
+        return t
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.threading.Thread", side_effect=fake_thread):
+        p._trigger_warmup_if_needed()
+
+    assert len(fired) == 1
+
+
+def test_trigger_warmup_does_not_fire_at_replicas_limit():
+    backend = make_mock_backend()
+    p = make_provider(backend, pre_warm_count=2, replicas=2)
+    _setup_active_sandbox(p, "box-1", "thread-1")
+    _setup_active_sandbox(p, "box-2", "thread-2")
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.threading.Thread") as mock_thread:
+        p._trigger_warmup_if_needed()
+
+    mock_thread.assert_not_called()
+
+
+def test_trigger_warmup_does_not_fire_when_warm_pool_fills_replicas():
+    """Warm-pool containers count toward the replica limit."""
+    backend = make_mock_backend()
+    p = make_provider(backend, pre_warm_count=2, replicas=2)
+    # 1 active + 1 warm = 2 total = replicas → must NOT fire
+    _setup_active_sandbox(p, "box-1", "thread-1")
+    warm_info = SandboxInfo(sandbox_id="box-warm", sandbox_url="http://localhost:9020")
+    import time as _time
+
+    p._warm_pool["box-warm"] = (warm_info, _time.time())
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.threading.Thread") as mock_thread:
+        p._trigger_warmup_if_needed()
+
+    mock_thread.assert_not_called()
+
+
+def test_trigger_warmup_disabled_when_pre_warm_count_zero():
+    backend = make_mock_backend()
+    p = make_provider(backend, pre_warm_count=0, replicas=5)
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.threading.Thread") as mock_thread:
+        p._trigger_warmup_if_needed()
+
+    mock_thread.assert_not_called()
+
+
+# ── Migrate prewarm dirs (local backend) ──────────────────────────────────────
+
+
+def test_migrate_prewarm_dirs_renames_tree(tmp_path):
+    """_migrate_prewarm_dirs must create a symlink/junction threads/{real}/ → threads/{placeholder}/."""
+    import sys
+
+    from deerflow.community.aio_sandbox.local_backend import LocalContainerBackend
+    from deerflow.config.paths import Paths
+
+    local_backend = MagicMock(spec=LocalContainerBackend)
+    p = make_provider(local_backend)
+    p._backend = local_backend
+
+    real_paths = Paths(base_dir=tmp_path)
+    placeholder = "prewarm-migrate1"
+    real_thread = "real-thread-abc"
+
+    real_paths.ensure_thread_dirs(placeholder)
+    src_workspace = real_paths.sandbox_work_dir(placeholder)
+    (src_workspace / "test.txt").write_text("hello")
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths", return_value=real_paths):
+        p._migrate_prewarm_dirs(placeholder, real_thread, "pw-abc123")
+
+    # Placeholder dir must still exist (container bind mounts point there)
+    assert real_paths.thread_dir(placeholder).exists()
+    # The real thread dir must exist (as symlink or junction)
+    dst = real_paths.thread_dir(real_thread)
+    assert dst.exists() or dst.is_symlink()
+    # Files must be accessible via the real thread path
+    if sys.platform == "win32":
+        # Junction: files directly accessible
+        assert (real_paths.sandbox_work_dir(real_thread) / "test.txt").read_text() == "hello"
+    else:
+        # Symlink: files accessible via resolved path
+        assert dst.is_symlink()
+        assert (dst / "user-data" / "workspace" / "test.txt").read_text() == "hello"
+    # Mapping must be recorded
+    assert "pw-abc123" in p._sandbox_placeholder
+    assert p._sandbox_placeholder["pw-abc123"] == (placeholder, real_thread)
+
+
+def test_migrate_prewarm_dirs_skips_when_dst_exists(tmp_path):
+    """_migrate_prewarm_dirs must not error when destination already exists."""
+    from deerflow.community.aio_sandbox.local_backend import LocalContainerBackend
+    from deerflow.config.paths import Paths
+
+    local_backend = MagicMock(spec=LocalContainerBackend)
+    p = make_provider(local_backend)
+    p._backend = local_backend
+
+    real_paths = Paths(base_dir=tmp_path)
+    placeholder = "prewarm-skip1"
+    real_thread = "real-thread-exists"
+
+    real_paths.ensure_thread_dirs(placeholder)
+    real_paths.ensure_thread_dirs(real_thread)
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox_provider.get_paths", return_value=real_paths):
+        p._migrate_prewarm_dirs(placeholder, real_thread, "pw-skip")  # must not raise
+
+    assert real_paths.thread_dir(real_thread).exists()
+    # No placeholder mapping recorded when dst already existed
+    assert "pw-skip" not in p._sandbox_placeholder
+
+
+def test_migrate_prewarm_dirs_calls_reassign_for_remote_backend():
+    """_migrate_prewarm_dirs must call backend.reassign() for remote backends."""
+    backend = make_mock_backend()
+    p = make_provider(backend)
+    backend.reassign = MagicMock()
+
+    p._migrate_prewarm_dirs("prewarm-remote1", "thread-real", "pw-remote")
+
+    backend.reassign.assert_called_once_with("pw-remote", "thread-real")
+
+
+def test_migrate_prewarm_dirs_tolerates_reassign_failure():
+    """_migrate_prewarm_dirs must log a warning (not raise) when reassign fails."""
+    backend = make_mock_backend()
+    p = make_provider(backend)
+    backend.reassign = MagicMock(side_effect=RuntimeError("provisioner unavailable"))
+
+    p._migrate_prewarm_dirs("prewarm-err", "thread-real", "pw-err")  # must not raise
+
+
+# ── Pre-warm skips when total >= pre_warm_count ───────────────────────────────
+
+
+def test_prewarm_skips_when_active_sandbox_exists():
+    """_cleanup_dead_prewarm should not create new containers (that is trigger's job)."""
+    backend = make_mock_backend()
+    p = make_provider(backend, pre_warm_count=1, replicas=5)
+    _setup_active_sandbox(p, "pw-claimed", "thread-1")
+
+    p._cleanup_dead_prewarm()
+    with p._lock:
+        current_prewarm = len(p._prewarm_pool)
+        current_active = len(p._sandboxes)
+
+    assert current_prewarm + current_active >= 1
+    backend.create.assert_not_called()

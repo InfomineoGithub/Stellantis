@@ -14,7 +14,10 @@ import atexit
 import hashlib
 import logging
 import os
+import shutil
 import signal
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -47,7 +50,6 @@ DEFAULT_CONTAINER_PREFIX = "deer-flow-sandbox"
 DEFAULT_IDLE_TIMEOUT = 600  # 10 minutes in seconds
 DEFAULT_REPLICAS = 3  # Maximum concurrent sandbox containers
 DEFAULT_PRE_WARM_COUNT = 0  # disabled by default
-DEFAULT_MAX_THREADS_PER_SANDBOX = 1  # dedicated pod per thread by default
 IDLE_CHECK_INTERVAL = 60  # Check every 60 seconds
 
 
@@ -88,8 +90,18 @@ class AioSandboxProvider(SandboxProvider):
         # when replicas capacity is exhausted.
         self._warm_pool: dict[str, tuple[SandboxInfo, float]] = {}
         self._ref_counts: dict[str, int] = {}  # sandbox_id → active holder count
-        self._slot_counts: dict[str, int] = {}  # sandbox_id → threads assigned (for max_threads_per_sandbox)
-        self._prewarm_pool: dict[str, tuple[SandboxInfo, float]] = {}  # pre-warmed ready containers
+        # Pre-warm pool: maps sandbox_id → (SandboxInfo, placeholder_thread_id, timestamp).
+        # Each pre-warmed sandbox has a placeholder thread ID so its data lives in the
+        # standard threads/{placeholder}/user-data/ hierarchy.  When a thread claims
+        # the sandbox a symlink/junction threads/{real_thread_id} → threads/{placeholder}
+        # is created so host-side code can find the files without renaming the bind-mount
+        # source (renaming breaks Docker Desktop on Windows because bind mounts are
+        # path-based in the WSL2/virtiofs layer).
+        self._prewarm_pool: dict[str, tuple[SandboxInfo, str, float]] = {}
+        # Tracks claimed pre-warm sandboxes so destroy() can remove both the
+        # symlink/junction and the underlying placeholder dir.
+        # Maps sandbox_id → (placeholder_thread_id, real_thread_id)
+        self._sandbox_placeholder: dict[str, tuple[str, str]] = {}
         self._shutdown_called = False
         self._idle_checker_stop = threading.Event()
         self._idle_checker_thread: threading.Thread | None = None
@@ -155,7 +167,6 @@ class AioSandboxProvider(SandboxProvider):
             # provisioner URL for dynamic pod management (e.g. http://provisioner:8002)
             "provisioner_url": getattr(sandbox_config, "provisioner_url", None) or "",
             "pre_warm_count": getattr(sandbox_config, "pre_warm_count", None) or DEFAULT_PRE_WARM_COUNT,
-            "max_threads_per_sandbox": getattr(sandbox_config, "max_threads_per_sandbox", None) or DEFAULT_MAX_THREADS_PER_SANDBOX,
         }
 
     @staticmethod
@@ -239,55 +250,59 @@ class AioSandboxProvider(SandboxProvider):
             logger.warning(f"Could not setup skills mount: {e}")
         return None
 
-    def _get_prewarm_mounts(self, sandbox_id: str) -> list[tuple[str, str, bool]] | None:
-        """Create mount points for a pre-warmed sandbox (local backend only).
+    def _migrate_prewarm_dirs(self, placeholder_thread_id: str, real_thread_id: str, sandbox_id: str) -> None:
+        """Link the real thread dir to the pre-warm placeholder dir.
 
-        For local container backends, pre-warmed sandboxes need writable
-        /mnt/user-data directories even though no thread has claimed them yet.
-        We create temporary host directories under {base_dir}/prewarm/{sandbox_id}/
-        and mount them into the container.
+        Instead of renaming the host directory (which would invalidate the bind-mount
+        paths that were baked into the running container at start time), we create a
+        symlink or directory junction:
 
-        For remote/provisioner backends, returns None (the provisioner handles
-        filesystem setup inside the Pod).
+            threads/{real_thread_id}  →  threads/{placeholder_thread_id}
+
+        This keeps the container's bind-mount source path intact (so writes inside
+        the container continue to be reflected on the host) while making the files
+        accessible under the real thread ID on the host.
+
+        * Linux / macOS – ``os.symlink(src, dst)``
+        * Windows      – ``mklink /J dst src`` (directory junction, no admin needed)
+
+        For remote backends (K8s), calls reassign() on the backend if available.
+        Falls back to a warning when the operation is unsupported (e.g. PVC mode).
         """
-        if not isinstance(self._backend, LocalContainerBackend):
-            return None
-
-        paths = get_paths()
-        prewarm_base = paths.base_dir / "prewarm" / sandbox_id
-
-        for subdir in ["workspace", "uploads", "outputs"]:
-            d = prewarm_base / subdir
-            d.mkdir(parents=True, exist_ok=True)
-            d.chmod(0o777)
-
-        # Use host_base_dir for mount sources (DooD support)
-        host_prewarm_base = Paths(base_dir=paths.host_base_dir).base_dir / "prewarm" / sandbox_id
-
-        mounts = [
-            (str(host_prewarm_base / "workspace"), f"{VIRTUAL_PATH_PREFIX}/workspace", False),
-            (str(host_prewarm_base / "uploads"), f"{VIRTUAL_PATH_PREFIX}/uploads", False),
-            (str(host_prewarm_base / "outputs"), f"{VIRTUAL_PATH_PREFIX}/outputs", False),
-        ]
-
-        skills_mount = self._get_skills_mount()
-        if skills_mount:
-            mounts.append(skills_mount)
-
-        return mounts
-
-    @staticmethod
-    def _cleanup_prewarm_dir(sandbox_id: str) -> None:
-        """Remove temporary host directories created for a pre-warmed sandbox."""
-        if not sandbox_id.startswith("pw-"):
-            return
-        import shutil
-
-        paths = get_paths()
-        prewarm_dir = paths.base_dir / "prewarm" / sandbox_id
-        if prewarm_dir.exists():
-            shutil.rmtree(prewarm_dir, ignore_errors=True)
-            logger.debug(f"Cleaned up prewarm directory for {sandbox_id}")
+        if isinstance(self._backend, LocalContainerBackend):
+            try:
+                paths = get_paths()
+                src = paths.thread_dir(placeholder_thread_id)
+                dst = paths.thread_dir(real_thread_id)
+                if src.exists() and not dst.exists():
+                    if sys.platform == "win32":
+                        # Directory junction – works without elevated privileges and
+                        # Docker Desktop resolves bind-mount paths BEFORE the junction
+                        # so the container's mounts (pointing at src) stay valid.
+                        subprocess.run(
+                            ["cmd", "/c", "mklink", "/J", str(dst), str(src)],
+                            check=True,
+                            capture_output=True,
+                        )
+                    else:
+                        # Symlink: container sees src (unchanged), host sees dst too.
+                        dst.symlink_to(src)
+                    logger.info(f"Linked prewarm dir {dst} → {src} for sandbox {sandbox_id}")
+                    # Record mapping so destroy() can remove both the link and the dir.
+                    with self._lock:
+                        self._sandbox_placeholder[sandbox_id] = (placeholder_thread_id, real_thread_id)
+                elif dst.exists():
+                    logger.debug(f"Destination thread dir already exists, skipping link: {dst}")
+            except Exception as e:
+                logger.warning(f"Failed to link prewarm dir for {sandbox_id}: {e}")
+        elif hasattr(self._backend, "reassign"):
+            try:
+                self._backend.reassign(sandbox_id, real_thread_id)  # type: ignore[union-attr]
+                logger.info(f"Reassigned remote sandbox {sandbox_id} to thread {real_thread_id}")
+            except Exception as e:
+                logger.warning(f"Remote sandbox reassign for {sandbox_id} failed (mount mismatch tolerated): {e}")
+        else:
+            logger.debug(f"Backend does not support reassign; sandbox {sandbox_id} mount dir stays as {placeholder_thread_id}")
 
     # ── Idle timeout management ──────────────────────────────────────────
 
@@ -364,23 +379,24 @@ class AioSandboxProvider(SandboxProvider):
     def _prewarm_one(self) -> None:
         """Create one sandbox speculatively and park it in the pre-warm pool.
 
-        Uses thread_id=None so the provisioner backend creates a Pod without
-        thread-specific configuration. The Pod is claimed and re-keyed when
-        a thread calls acquire().
-
-        For local container backends, temporary host directories are created
-        and mounted so that /mnt/user-data/* is writable inside the container.
+        Assigns a placeholder thread ID (``prewarm-{uuid8}``) so the sandbox
+        uses the standard ``threads/{placeholder}/user-data/`` directory layout.
+        When a real thread claims the sandbox, the directory is atomically
+        renamed to ``threads/{real_thread_id}/`` via ``_migrate_prewarm_dirs()``.
         """
-        import uuid
-
+        placeholder_thread_id = f"prewarm-{uuid.uuid4().hex[:8]}"
         sandbox_id = f"pw-{uuid.uuid4().hex[:8]}"
         try:
-            extra_mounts = self._get_prewarm_mounts(sandbox_id)
-            info = self._backend.create(thread_id=None, sandbox_id=sandbox_id, extra_mounts=extra_mounts)
+            extra_mounts = self._get_extra_mounts(placeholder_thread_id)
+            info = self._backend.create(
+                thread_id=placeholder_thread_id,
+                sandbox_id=sandbox_id,
+                extra_mounts=extra_mounts or None,
+            )
             if wait_for_sandbox_ready(info.sandbox_url, timeout=120):
                 with self._lock:
-                    self._prewarm_pool[sandbox_id] = (info, time.time())
-                logger.info(f"Pre-warmed sandbox {sandbox_id} ready at {info.sandbox_url}")
+                    self._prewarm_pool[sandbox_id] = (info, placeholder_thread_id, time.time())
+                logger.info(f"Pre-warmed sandbox {sandbox_id} (placeholder={placeholder_thread_id}) ready at {info.sandbox_url}")
             else:
                 self._backend.destroy(info)
                 logger.warning(f"Pre-warmed sandbox {sandbox_id} failed readiness check, destroyed")
@@ -390,46 +406,63 @@ class AioSandboxProvider(SandboxProvider):
     def _cleanup_dead_prewarm(self) -> None:
         """Remove pre-warm pool entries whose containers are no longer running."""
         with self._lock:
-            dead = [sid for sid, (info, _) in self._prewarm_pool.items() if not self._backend.is_alive(info)]
+            dead = [sid for sid, (info, _ph, _ts) in self._prewarm_pool.items() if not self._backend.is_alive(info)]
         for sid in dead:
             with self._lock:
                 entry = self._prewarm_pool.pop(sid, None)
             if entry:
-                info, _ = entry
-                logger.warning(f"Pre-warm sandbox {sid} container died, removing from pool")
+                info, placeholder_thread_id, _ = entry
+                logger.warning(f"Pre-warm sandbox {sid} (placeholder={placeholder_thread_id}) container died, removing from pool")
                 try:
                     self._backend.destroy(info)
                 except Exception:
                     pass
-                self._cleanup_prewarm_dir(sid)
+                try:
+                    shutil.rmtree(get_paths().thread_dir(placeholder_thread_id), ignore_errors=True)
+                except Exception:
+                    pass
 
-    def _prewarm_loop(self) -> None:
-        target = self._config.get("pre_warm_count", DEFAULT_PRE_WARM_COUNT)
-        while True:
+    def _prewarm_cleanup_loop(self) -> None:
+        """Background thread that periodically removes dead pre-warm pool entries."""
+        while not self._idle_checker_stop.wait(timeout=IDLE_CHECK_INTERVAL):
             try:
                 self._cleanup_dead_prewarm()
-                with self._lock:
-                    current_prewarm = len(self._prewarm_pool)
-                    current_active = len(self._sandboxes)
-                # Count active sandboxes toward the target to avoid spawning
-                # replacement containers when pre-warmed ones are claimed.
-                if current_prewarm + current_active < target:
-                    self._prewarm_one()
             except Exception as e:
-                logger.error(f"Pre-warm loop error: {e}")
-            if self._idle_checker_stop.wait(timeout=5):
-                break  # stop event was set
+                logger.error(f"Pre-warm cleanup loop error: {e}")
+
+    def _trigger_warmup_if_needed(self) -> None:
+        """Fire one async pre-warm if total (active + warm + prewarm) is below replicas.
+
+        Called after every sandbox claim so the pool replenishes reactively
+        rather than on a fixed schedule.  No-op when warmup is disabled or when
+        the total number of running containers already equals or exceeds replicas.
+        """
+        if self._config.get("pre_warm_count", DEFAULT_PRE_WARM_COUNT) <= 0:
+            return
+        replicas = self._config.get("replicas", DEFAULT_REPLICAS)
+        with self._lock:
+            # All three pools represent live containers consuming capacity.
+            total = len(self._sandboxes) + len(self._warm_pool) + len(self._prewarm_pool)
+        if total < replicas:
+            t = threading.Thread(target=self._prewarm_one, daemon=True, name="sandbox-prewarm-fill")
+            t.start()
 
     def _start_prewarm(self) -> None:
         count = self._config.get("pre_warm_count", DEFAULT_PRE_WARM_COUNT)
         if count > 0:
             self._prewarm_thread = threading.Thread(
-                target=self._prewarm_loop,
-                name="sandbox-prewarm",
+                target=self._prewarm_cleanup_loop,
+                name="sandbox-prewarm-cleanup",
                 daemon=True,
             )
             self._prewarm_thread.start()
-            logger.info(f"Started pre-warm thread (target pool size: {count})")
+            # Eagerly fill the pool at startup (up to replicas limit)
+            replicas = self._config.get("replicas", DEFAULT_REPLICAS)
+            fill_count = min(count, replicas)
+            for _ in range(fill_count):
+                t = threading.Thread(target=self._prewarm_one, daemon=True, name="sandbox-prewarm-init")
+                t.start()
+            logger.info(f"Started pre-warm cleanup thread and fired {fill_count} initial warmup thread(s)")
 
     # ── Signal handling ──────────────────────────────────────────────────
 
@@ -526,23 +559,9 @@ class AioSandboxProvider(SandboxProvider):
         # Deterministic ID for thread-specific, random for anonymous
         sandbox_id = self._deterministic_sandbox_id(thread_id) if thread_id else str(uuid.uuid4())[:8]
 
-        # ── Layer 1.2: Multi-thread slot sharing ──
-        if thread_id:
-            shared_id = self._find_available_slot()
-            if shared_id is not None:
-                with self._lock:
-                    # Re-verify under lock (another thread may have filled the slot)
-                    max_slots = self._config.get("max_threads_per_sandbox", DEFAULT_MAX_THREADS_PER_SANDBOX)
-                    if self._slot_counts.get(shared_id, 0) < max_slots and shared_id in self._sandboxes:
-                        self._slot_counts[shared_id] = self._slot_counts.get(shared_id, 0) + 1
-                        self._ref_counts[shared_id] = self._ref_counts.get(shared_id, 0) + 1
-                        self._thread_sandboxes[thread_id] = shared_id
-                        self._last_activity[shared_id] = time.time()
-                        logger.info(f"Thread {thread_id} joined shared sandbox {shared_id} (slots: {self._slot_counts[shared_id]}/{max_slots})")
-                        return shared_id
-
         # ── Layer 1.5: Warm pool (container still running, no cold-start) ──
         if thread_id:
+            _warm_claimed_id: str | None = None
             with self._lock:
                 if sandbox_id in self._warm_pool:
                     info, _ = self._warm_pool.pop(sandbox_id)
@@ -552,24 +571,34 @@ class AioSandboxProvider(SandboxProvider):
                     self._last_activity[sandbox_id] = time.time()
                     self._ref_counts[sandbox_id] = self._ref_counts.get(sandbox_id, 0) + 1
                     self._thread_sandboxes[thread_id] = sandbox_id
+                    _warm_claimed_id = sandbox_id
                     logger.info(f"Reclaimed warm-pool sandbox {sandbox_id} for thread {thread_id} at {info.sandbox_url}")
-                    return sandbox_id
+            if _warm_claimed_id is not None:
+                self._trigger_warmup_if_needed()
+                return _warm_claimed_id
 
         # ── Layer 1.75: Pre-warm pool (hot spare, no cold-start) ──
         if thread_id:
+            _prewarm_claimed_id: str | None = None
+            _prewarm_placeholder: str | None = None
             with self._lock:
                 if self._prewarm_pool:
-                    # Claim the oldest pre-warmed sandbox
-                    oldest_pw_id = min(self._prewarm_pool, key=lambda sid: self._prewarm_pool[sid][1])
-                    info, _ = self._prewarm_pool.pop(oldest_pw_id)
+                    # Claim the oldest pre-warmed sandbox (sort by timestamp at index 2)
+                    oldest_pw_id = min(self._prewarm_pool, key=lambda sid: self._prewarm_pool[sid][2])
+                    info, placeholder_thread_id, _ = self._prewarm_pool.pop(oldest_pw_id)
                     sandbox = AioSandbox(id=oldest_pw_id, base_url=info.sandbox_url)
                     self._sandboxes[oldest_pw_id] = sandbox
                     self._sandbox_infos[oldest_pw_id] = info
                     self._last_activity[oldest_pw_id] = time.time()
                     self._ref_counts[oldest_pw_id] = 1
                     self._thread_sandboxes[thread_id] = oldest_pw_id
+                    _prewarm_claimed_id = oldest_pw_id
+                    _prewarm_placeholder = placeholder_thread_id
                     logger.info(f"Thread {thread_id} claimed pre-warmed sandbox {oldest_pw_id} at {info.sandbox_url}")
-                    return oldest_pw_id
+            if _prewarm_claimed_id is not None:
+                self._migrate_prewarm_dirs(_prewarm_placeholder, thread_id, _prewarm_claimed_id)  # type: ignore[arg-type]
+                self._trigger_warmup_if_needed()
+                return _prewarm_claimed_id
 
         # ── Layer 2: Backend discovery + create (protected by cross-process lock) ──
         # Use a file lock so that two processes racing to create the same sandbox
@@ -687,21 +716,6 @@ class AioSandboxProvider(SandboxProvider):
         except Exception as e:
             logger.error(f"Failed to destroy evicted warm pool sandbox {oldest_id}: {e}")
 
-    def _find_available_slot(self) -> str | None:
-        """Find an active sandbox with a free slot for multi-thread sharing.
-
-        Returns the sandbox_id of the first active sandbox whose slot count is
-        below max_threads_per_sandbox, or None if all are full (or sharing is disabled).
-        """
-        max_slots = self._config.get("max_threads_per_sandbox", DEFAULT_MAX_THREADS_PER_SANDBOX)
-        if max_slots <= 1:
-            return None
-        with self._lock:
-            for sid, slot_count in self._slot_counts.items():
-                if slot_count < max_slots and sid in self._sandboxes:
-                    return sid
-        return None
-
     def _create_sandbox(self, thread_id: str | None, sandbox_id: str) -> str:
         """Create a new sandbox via the backend.
 
@@ -738,11 +752,11 @@ class AioSandboxProvider(SandboxProvider):
             self._sandbox_infos[sandbox_id] = info
             self._last_activity[sandbox_id] = time.time()
             self._ref_counts[sandbox_id] = self._ref_counts.get(sandbox_id, 0) + 1
-            self._slot_counts[sandbox_id] = self._slot_counts.get(sandbox_id, 0) + 1
             if thread_id:
                 self._thread_sandboxes[thread_id] = sandbox_id
 
         logger.info(f"Created sandbox {sandbox_id} for thread {thread_id} at {info.sandbox_url}")
+        self._trigger_warmup_if_needed()
         return sandbox_id
 
     def get(self, sandbox_id: str) -> Sandbox | None:
@@ -782,7 +796,6 @@ class AioSandboxProvider(SandboxProvider):
             for tid in thread_ids_to_remove:
                 del self._thread_sandboxes[tid]
             self._last_activity.pop(sandbox_id, None)
-            self._slot_counts.pop(sandbox_id, None)
             if info and sandbox_id not in self._warm_pool:
                 self._warm_pool[sandbox_id] = (info, time.time())
 
@@ -816,6 +829,32 @@ class AioSandboxProvider(SandboxProvider):
         if info:
             self._backend.destroy(info)
             logger.info(f"Destroyed sandbox {sandbox_id}")
+
+        # Clean up symlink/junction and prewarm dir for pre-warm claimed sandboxes.
+        prewarm_data: tuple[str, str] | None = None
+        with self._lock:
+            prewarm_data = self._sandbox_placeholder.pop(sandbox_id, None)
+        if prewarm_data:
+            placeholder_thread_id, real_thread_id = prewarm_data
+            paths = get_paths()
+            link_path = paths.thread_dir(real_thread_id)
+            prewarm_path = paths.thread_dir(placeholder_thread_id)
+            # Remove the symlink / junction first so rmtree doesn't follow it.
+            try:
+                if sys.platform == "win32":
+                    # os.rmdir removes a junction without touching the target.
+                    if link_path.exists():
+                        os.rmdir(str(link_path))
+                else:
+                    if link_path.is_symlink():
+                        link_path.unlink()
+            except Exception as e:
+                logger.warning(f"Failed to remove prewarm link {link_path}: {e}")
+            # Remove the actual prewarm data directory.
+            try:
+                shutil.rmtree(prewarm_path, ignore_errors=True)
+            except Exception as e:
+                logger.warning(f"Failed to remove prewarm dir {prewarm_path}: {e}")
 
     def shutdown(self) -> None:
         """Shutdown all sandboxes. Thread-safe and idempotent."""
@@ -854,10 +893,13 @@ class AioSandboxProvider(SandboxProvider):
             except Exception as e:
                 logger.error(f"Failed to destroy warm-pooled sandbox {sandbox_id} during shutdown: {e}")
 
-        for sandbox_id, (info, _) in prewarm_items:
+        for sandbox_id, (info, placeholder_thread_id, _) in prewarm_items:
             try:
                 self._backend.destroy(info)
-                self._cleanup_prewarm_dir(sandbox_id)
-                logger.info(f"Destroyed pre-warmed sandbox {sandbox_id} during shutdown")
+                try:
+                    shutil.rmtree(get_paths().thread_dir(placeholder_thread_id), ignore_errors=True)
+                except Exception:
+                    pass
+                logger.info(f"Destroyed pre-warmed sandbox {sandbox_id} (placeholder={placeholder_thread_id}) during shutdown")
             except Exception as e:
                 logger.error(f"Failed to destroy pre-warmed sandbox {sandbox_id} during shutdown: {e}")

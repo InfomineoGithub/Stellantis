@@ -154,3 +154,20 @@ class RemoteSandboxBackend(SandboxBackend):
         except requests.RequestException as exc:
             logger.debug(f"Provisioner discover failed for {sandbox_id}: {exc}")
             return None
+
+    def reassign(self, sandbox_id: str, new_thread_id: str) -> None:
+        """PATCH /api/sandboxes/{sandbox_id}/reassign → rename hostPath dir to real thread ID.
+
+        Only supported by the provisioner in hostPath mode (not PVC mode).
+        Raises RuntimeError if the provisioner returns a non-success status.
+        """
+        try:
+            resp = requests.patch(
+                f"{self._provisioner_url}/api/sandboxes/{sandbox_id}/reassign",
+                json={"new_thread_id": new_thread_id},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            logger.info(f"Provisioner reassigned sandbox {sandbox_id} to thread {new_thread_id}")
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Provisioner reassign failed for {sandbox_id}: {exc}") from exc
