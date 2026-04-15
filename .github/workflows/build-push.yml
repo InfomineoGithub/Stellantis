@@ -3,6 +3,7 @@ name: Build & Push
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: build-${{ github.ref }}
@@ -34,7 +35,7 @@ jobs:
 
   build-backend:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -69,7 +70,7 @@ jobs:
 
   build-frontend:
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
+    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -105,7 +106,7 @@ jobs:
 
   build-provisioner:
     needs: changes
-    if: needs.changes.outputs.provisioner == 'true'
+    if: needs.changes.outputs.provisioner == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
