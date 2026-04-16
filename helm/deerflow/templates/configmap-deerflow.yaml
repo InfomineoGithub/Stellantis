@@ -61,7 +61,7 @@ data:
         use: deerflow.sandbox.tools:bash_tool
 
     sandbox:
-      use: deerflow.community.aio_sandbox:AioSandboxProvider
+      use: deerflow.sandbox.local:LocalSandboxProvider
       provisioner_url: http://{{ include "deerflow.fullname" . }}-provisioner:8002
 
     skills:
