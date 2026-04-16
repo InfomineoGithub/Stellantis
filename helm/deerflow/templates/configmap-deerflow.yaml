@@ -11,6 +11,15 @@ data:
     config_version: 1
 
     models:
+      - name: gemini-3-flash
+        display_name: Gemini 3 Flash
+        use: langchain_google_genai:ChatGoogleGenerativeAI
+        model: gemini-3-flash-preview
+        google_api_key: $GOOGLE_API_KEY
+        max_tokens: 1048576
+        supports_thinking: true
+        supports_vision: true
+
       - name: gemini-3.1-pro
         display_name: Gemini 3.1 Pro
         use: langchain_google_genai:ChatGoogleGenerativeAI
@@ -20,14 +29,7 @@ data:
         supports_thinking: true
         supports_vision: true
 
-      - name: gemini-3-flash
-        display_name: Gemini 3 Flash
-        use: langchain_google_genai:ChatGoogleGenerativeAI
-        model: gemini-3-flash-preview
-        google_api_key: $GOOGLE_API_KEY
-        max_tokens: 1048576
-        supports_thinking: true
-        supports_vision: true
+
 
     tool_groups:
       - name: file:read
