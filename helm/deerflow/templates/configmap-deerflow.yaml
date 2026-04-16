@@ -57,7 +57,6 @@ data:
 
     sandbox:
       use: deerflow.sandbox.local:LocalSandboxProvider
-      provisioner_url: http://{{ include "deerflow.fullname" . }}-provisioner:8002
 
     skills:
       container_path: /mnt/skills
