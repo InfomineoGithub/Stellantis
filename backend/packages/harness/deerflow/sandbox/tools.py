@@ -129,8 +129,22 @@ def resolve_local_tool_path(path: str, thread_data: ThreadDataState | None) -> s
     if thread_data is None:
         raise SandboxRuntimeError("Thread data not available for local sandbox")
 
+    # Allow read-only access to skills directory
+    if path.startswith("/mnt/skills/") or path == "/mnt/skills":
+        from deerflow.config import get_app_config
+        config = get_app_config()
+        skills_path = config.skills.get_skills_path()
+        relative = path[len("/mnt/skills"):].lstrip("/")
+        resolved = (skills_path / relative).resolve()
+        # Prevent path traversal
+        try:
+            resolved.relative_to(skills_path.resolve())
+        except ValueError:
+            raise PermissionError("Access denied: path traversal detected")
+        return str(resolved)
+
     if not path.startswith(f"{VIRTUAL_PATH_PREFIX}/"):
-        raise PermissionError(f"Only paths under {VIRTUAL_PATH_PREFIX}/ are allowed")
+        raise PermissionError(f"Only paths under {VIRTUAL_PATH_PREFIX}/ or /mnt/skills/ are allowed")
 
     resolved_path = replace_virtual_path(path, thread_data)
     resolved = Path(resolved_path).resolve()
@@ -174,6 +188,9 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
         if absolute_path == VIRTUAL_PATH_PREFIX or absolute_path.startswith(f"{VIRTUAL_PATH_PREFIX}/"):
             continue
 
+        if absolute_path == "/mnt/skills" or absolute_path.startswith("/mnt/skills/"):
+            continue
+
         if any(absolute_path == prefix.rstrip("/") or absolute_path.startswith(prefix) for prefix in _LOCAL_BASH_SYSTEM_PATH_PREFIXES):
             continue
 
@@ -184,8 +201,24 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
         raise PermissionError(f"Unsafe absolute paths in command: {unsafe}. Use paths under {VIRTUAL_PATH_PREFIX}")
 
 
+def _replace_skills_paths(command: str) -> str:
+    """Replace /mnt/skills paths with actual skills directory path."""
+    if "/mnt/skills" not in command:
+        return command
+    from deerflow.config import get_app_config
+    config = get_app_config()
+    skills_path = str(config.skills.get_skills_path())
+    pattern = re.compile(r"/mnt/skills(/[^\s\"';&|<>()]*)?")
+
+    def replace_match(match: re.Match) -> str:
+        suffix = match.group(1) or ""
+        return skills_path + suffix
+
+    return pattern.sub(replace_match, command)
+
+
 def replace_virtual_paths_in_command(command: str, thread_data: ThreadDataState | None) -> str:
-    """Replace all virtual /mnt/user-data paths in a command string.
+    """Replace all virtual /mnt/user-data and /mnt/skills paths in a command string.
 
     Args:
         command: The command string that may contain virtual paths.
@@ -194,6 +227,8 @@ def replace_virtual_paths_in_command(command: str, thread_data: ThreadDataState 
     Returns:
         The command with all virtual paths replaced.
     """
+    command = _replace_skills_paths(command)
+
     if VIRTUAL_PATH_PREFIX not in command:
         return command
 
