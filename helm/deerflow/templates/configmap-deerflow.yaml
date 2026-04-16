@@ -10,36 +10,30 @@ data:
     config_version: 1
 
     models:
-      - name: gemini-3.1-pro-preview
+      - name: gemini-3.1-pro
         display_name: Gemini 3.1 Pro
         use: langchain_google_genai:ChatGoogleGenerativeAI
         model: gemini-3.1-pro-preview
         google_api_key: $GOOGLE_API_KEY
-        max_tokens: 8192
+        max_tokens: 2097152
+        supports_thinking: true
+        supports_vision: true
+
+      - name: gemini-3-flash
+        display_name: Gemini 3 Flash
+        use: langchain_google_genai:ChatGoogleGenerativeAI
+        model: gemini-3-flash-preview
+        google_api_key: $GOOGLE_API_KEY
+        max_tokens: 1048576
+        supports_thinking: true
         supports_vision: true
 
     tool_groups:
-      - name: web
       - name: file:read
       - name: file:write
       - name: bash
 
     tools:
-      - name: web_search
-        group: web
-        use: deerflow.community.tavily.tools:web_search_tool
-        max_results: 5
-
-      - name: web_fetch
-        group: web
-        use: deerflow.community.jina_ai.tools:web_fetch_tool
-        timeout: 10
-
-      - name: image_search
-        group: web
-        use: deerflow.community.image_search.tools:image_search_tool
-        max_results: 5
-
       - name: ls
         group: file:read
         use: deerflow.sandbox.tools:ls_tool
@@ -86,14 +80,7 @@ data:
       summary_prompt: null
 
     memory:
-      enabled: true
-      storage_path: memory.json
-      debounce_seconds: 30
-      model_name: null
-      max_facts: 100
-      fact_confidence_threshold: 0.7
-      injection_enabled: true
-      max_injection_tokens: 2000
+      enabled: false
 
     checkpointer:
       type: {{ .Values.checkpointer.type }}
