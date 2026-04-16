@@ -24,7 +24,7 @@ spec:
       initContainers:
         - name: init-extensions-config
           image: busybox
-          command: ["sh", "-c", "[ -f /writable-config/extensions_config.json ] || cp /default-config/extensions_config.json /writable-config/extensions_config.json"]
+          command: ["sh", "-c", "CHECKSUM=$(md5sum /default-config/extensions_config.json | cut -d' ' -f1); SENTINEL=/writable-config/.extensions_config.checksum; if [ ! -f /writable-config/extensions_config.json ] || [ \"$(cat $SENTINEL 2>/dev/null)\" != \"$CHECKSUM\" ]; then cp /default-config/extensions_config.json /writable-config/extensions_config.json && echo \"$CHECKSUM\" > $SENTINEL; fi"]
           resources:
             requests:
               cpu: 250m
