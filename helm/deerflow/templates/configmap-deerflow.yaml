@@ -6,6 +6,7 @@ metadata:
     {{- include "deerflow.labels" . | nindent 4 }}
     app.kubernetes.io/component: config
 data:
+  extensions_config.json: {{ .Values.extensionsConfig | toJson | quote }}
   config.yaml: |
     config_version: 1
 

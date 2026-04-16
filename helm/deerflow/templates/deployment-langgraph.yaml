@@ -22,14 +22,17 @@ spec:
         checksum/config: {{ include (print .Template.BasePath "/configmap-deerflow.yaml") . | sha256sum }}
     spec:
       initContainers:
-        - name: copy-extensions-config
+        - name: init-extensions-config
           image: busybox
-          command: ["sh", "-c", "[ -f /writable-config/extensions_config.json ] || echo '{\"mcpServers\":{},\"skills\":{}}' > /writable-config/extensions_config.json"]
+          command: ["sh", "-c", "[ -f /writable-config/extensions_config.json ] || cp /default-config/extensions_config.json /writable-config/extensions_config.json"]
           resources:
             requests:
               cpu: 250m
               memory: 512Mi
           volumeMounts:
+            - name: config
+              mountPath: /default-config
+              readOnly: true
             - name: deer-flow-home
               mountPath: /writable-config
         - name: sync-skills
