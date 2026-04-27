@@ -52,6 +52,13 @@ class SkillStateConfig(BaseModel):
     enabled: bool = Field(default=True, description="Whether this skill is enabled")
 
 
+class AdapterConfig(BaseModel):
+    enabled: bool = False
+    wraps_server: str | None = None
+    hide_wrapped_tools: bool = False
+    tool_mappings: dict[str, str] = Field(default_factory=dict)
+
+
 class ExtensionsConfig(BaseModel):
     """Unified configuration for MCP servers and skills."""
 
@@ -64,6 +71,7 @@ class ExtensionsConfig(BaseModel):
         default_factory=dict,
         description="Map of skill name to state configuration",
     )
+    adapters: dict[str, AdapterConfig] = Field(default_factory=dict)
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     @classmethod
