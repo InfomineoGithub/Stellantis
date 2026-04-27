@@ -268,6 +268,10 @@ export interface Translations {
     tools: {
       title: string;
       description: string;
+      adapterHideRaw: string;
+      adapterEnable: string;
+      adapterDescriptionHideRaw: string;
+      adapterDescriptionShowRaw: string;
     };
     skills: {
       title: string;

@@ -4,6 +4,7 @@ from langchain.tools import BaseTool
 
 from deerflow.config import get_app_config
 from deerflow.reflection import resolve_variable
+from deerflow.tools.adapters import load_adapter_tools
 from deerflow.tools.builtins import ask_clarification_tool, present_file_tool, task_tool, view_image_tool
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ def get_available_tools(
     # made through the Gateway API (which runs in a separate process) are immediately
     # reflected when loading MCP tools.
     mcp_tools = []
+    adapter_tools = []
     if include_mcp:
         try:
             from deerflow.config.extensions_config import ExtensionsConfig
@@ -58,6 +60,8 @@ def get_available_tools(
                 mcp_tools = get_cached_mcp_tools()
                 if mcp_tools:
                     logger.info(f"Using {len(mcp_tools)} cached MCP tool(s)")
+
+            adapter_tools, mcp_tools = load_adapter_tools(extensions_config, mcp_tools)
         except ImportError:
             logger.warning("MCP module not available. Install 'langchain-mcp-adapters' package to enable MCP tools.")
         except Exception as e:
@@ -81,4 +85,6 @@ def get_available_tools(
         builtin_tools.append(view_image_tool)
         logger.info(f"Including view_image_tool for model '{model_name}' (supports_vision=True)")
 
-    return loaded_tools + builtin_tools + mcp_tools
+    adapter_tools = adapter_tools if include_mcp else []
+
+    return loaded_tools + builtin_tools + mcp_tools + adapter_tools

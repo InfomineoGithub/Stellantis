@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app.gateway.config import get_gateway_config
 from app.gateway.routers import (
+    adapters,
     agents,
     artifacts,
     channels,
@@ -179,6 +180,9 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
 
     # Channels API is mounted at /api/channels
     app.include_router(channels.router)
+
+    # Adapters API is mounted at /api/adapters
+    app.include_router(adapters.router)
 
     # Vehicles API is mounted at /api/vehicles
     app.include_router(vehicles_router.router)

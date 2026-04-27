@@ -546,5 +546,186 @@ The cache stores three globals: `_app_config`, `_app_config_path`, and `_app_con
 
 ---
 
+## ADR-016: Built-in Adapter Layer to Eliminate Base64 and Full-Content Round-Trips
+
+**Status:** Accepted
+**Date:** 2026-04-27
+
+### Context
+
+Two categories of MCP tools force the agent to handle raw binary data inline, bloating the context window on every file-related operation:
+
+1. **RAGFlow upload/download** — `upload_with_metadata` and `download_attachment` exchange file content as base64-encoded strings passed directly as tool call arguments and results. A 100 KB PDF adds ~133 KB of base64 noise per operation; multi-page documents reach megabyte scale. The agent must construct or parse the full base64 string even though it has no semantic use for the binary content.
+
+2. **Cloudflare `browser_render_markdown`** — returns the full rendered Markdown of a fetched page as a tool result. When the agent needs to save content to disk it receives the full text in the result, then re-passes the full text as an argument to a write call. Content doubles in context on every web-fetch-to-file flow.
+
+Both patterns burn tokens on encoding overhead, degrade model attention, and increase API cost multiplicatively when multiple file operations occur in a single task.
+
+### Decision
+
+Introduce a **built-in adapter layer** (`deerflow/tools/adapters/`) that wraps the raw MCP tools. Adapter tools expose a path-based interface to the model — the model works with file paths only. All base64 encoding/decoding, HTTP fetching, and file I/O happen server-side, transparent to the model.
+
+Three adapter tools are provided:
+- `ragflow_upload` — accepts a file path, reads and encodes the file internally, calls `upload_with_metadata`.
+- `ragflow_download` — accepts doc IDs and an output directory, calls `download_attachment`, decodes base64, and writes files to disk. Returns saved paths only.
+- `fetch_url` — accepts a URL and output directory. Webpages: calls `browser_render_markdown` and writes the Markdown to a file. Binary files (PDF, DOCX, XLSX, PPTX): fetches via httpx and writes bytes directly.
+
+### Alternatives considered
+
+- **Prompt-based instructions to avoid base64 in context:** Instruct the model to avoid reading base64 output. Unreliable — the tool result appears in context regardless.
+- **MCP server-side changes:** Modify RAGFlow's MCP tool to accept file paths. Requires upstream changes outside this project's control.
+- **Stripping tool results from context:** Post-process messages to remove large tool results. Breaks agent reasoning continuity; not a general solution.
+
+### Consequences
+
+- **Positive:** Model never sees base64 or full page content. Token cost per file operation drops proportionally to file size. Works transparently — adapter tools are loaded alongside regular MCP tools.
+- **Negative:** The adapter layer adds a mapping between logical tool names and actual MCP tool names. If the MCP tool name changes, `tool_mappings` in `extensions_config.json` must be updated.
+- **Constraint:** Adapters must be enabled explicitly; raw MCP tools remain available unless `hide_wrapped_tools: true` is set.
+
+---
+
+## ADR-017: Adapter Internal Architecture — `_do_*` / `make_*_tool` Split
+
+**Status:** Accepted
+**Date:** 2026-04-27
+
+### Context
+
+Each adapter tool needs two distinct behaviors: (a) pure file/network I/O logic that is unit-testable without LangGraph context, and (b) a LangChain `BaseTool`-compatible wrapper that resolves virtual paths from the LangGraph runtime before delegating to the I/O logic.
+
+### Decision
+
+Each adapter module is split into two layers:
+
+**`_do_*` functions** — pure I/O implementation. Accept and return real host paths only. No runtime, no virtual path logic. Directly testable with `MagicMock` MCP tools and `tmp_path`.
+
+```python
+def _do_upload(path: str, dataset_id: str, ..., upload_mcp: BaseTool) -> str: ...
+def _do_download(doc_ids: list[str], output_dir: str, ..., download_mcp: BaseTool) -> str: ...
+def _do_fetch(url: str, output_dir: str, content_type: str | None, webpage_mcp: BaseTool) -> str: ...
+```
+
+**`make_*_tool` functions** — factory that returns a `BaseTool`. The inner `@tool`-decorated function:
+1. Accepts `runtime: ToolRuntime` (LangGraph-injected, invisible to the model — excluded from `tool.args`).
+2. Calls `get_thread_data(runtime)` to retrieve per-thread path mappings.
+3. Translates virtual input paths via `replace_virtual_path(path, thread_data)`.
+4. Delegates to the corresponding `_do_*` function with real paths.
+5. Masks real paths in the output via `mask_local_paths_in_output(result, thread_data)`.
+
+The MCP tool reference is closed over at construction time — each adapter tool instance wraps a specific MCP tool object looked up from the live `mcp_tools` list.
+
+```
+Adapter registry (adapters/__init__.py)
+  └── load_adapter_tools(extensions_config, mcp_tools)
+        ├── looks up module by adapter name
+        ├── calls module.get_tools(adapter_config, mcp_tools)
+        └── optionally filters mcp_tools if hide_wrapped_tools=True
+```
+
+### Alternatives considered
+
+- **Single function combining I/O and path translation:** Simpler structure but makes unit testing require a full LangGraph `ToolRuntime` mock. The split keeps `_do_*` tests fast and dependency-free.
+- **Subclassing `BaseTool` directly:** More explicit but verbose; the `@tool` decorator with `parse_docstring=True` generates the LLM-visible schema from the docstring automatically.
+
+### Consequences
+
+- **Positive:** `_do_*` functions are testable with zero LangGraph dependencies (37 tests, no live services). Path translation logic is centralised in the `make_*_tool` wrapper and reuses the same sandbox utilities as all other built-in tools.
+- **Negative:** Two-layer split adds a small amount of indirection per adapter.
+- **Extensibility:** Adding a new adapter requires only: a module with `_do_*` + `make_*_tool`, an `__init__.py` exposing `get_tools()`, and a one-line entry in `ADAPTER_REGISTRY`.
+
+---
+
+## ADR-018: `adapters` Section in `extensions_config.json`
+
+**Status:** Accepted
+**Date:** 2026-04-27
+
+### Context
+
+Adapters need per-deployment configuration: which adapters are enabled, which MCP server they wrap, whether to hide the raw wrapped tools, and the mapping from logical tool slot names to actual MCP tool names (which can vary by server version or deployment).
+
+This configuration must be readable and writable at runtime via the same Gateway API pattern used for MCP servers and skills, and must survive `PUT /api/mcp/config` calls without being discarded.
+
+### Decision
+
+Add an `adapters` top-level key to `extensions_config.json` with the following schema per adapter entry:
+
+```json
+"adapters": {
+  "<adapter_name>": {
+    "enabled": false,
+    "wraps_server": "<mcp_server_name>",
+    "hide_wrapped_tools": false,
+    "tool_mappings": {
+      "<logical_slot>": "<actual_mcp_tool_name>"
+    }
+  }
+}
+```
+
+Fields:
+- `enabled` — whether the adapter is loaded at all. Defaults to `false` so no adapter activates without explicit opt-in.
+- `wraps_server` — the MCP server name this adapter operates on. Used by `hide_wrapped_tools` filtering to identify which tools to remove from the visible set.
+- `hide_wrapped_tools` — when `true`, all tools whose name starts with `<wraps_server>__` are removed from the agent's tool list once the adapter is loaded.
+- `tool_mappings` — maps logical slot names (e.g. `"upload"`, `"download"`, `"webpage"`) to the actual tool name as loaded by `MultiServerMCPClient` (e.g. `"ragflow__upload_with_metadata"`). Decouples adapter logic from exact MCP naming conventions.
+
+A new `GET /api/adapters/config` and `PUT /api/adapters/config` Gateway endpoint read/write only the `adapters` key. `PUT /api/mcp/config` is patched to preserve the `adapters` key when rewriting the file.
+
+`extensions_config.example.json` is updated to include both adapter entries (disabled by default) as a reference for new deployments.
+
+### Alternatives considered
+
+- **Adapter config in `config.yaml`:** Would require restart-based config reload instead of mtime-based. Extensions config already owns MCP and skills runtime state — adapters belong there.
+- **Separate `adapters_config.json` file:** Adds operational complexity with no benefit; the extensions config is already the runtime-mutable config file.
+- **Hardcoded tool name mapping:** Would break when RAGFlow or Cloudflare change their MCP tool names across versions. `tool_mappings` makes the mapping explicit and operator-adjustable.
+
+### Consequences
+
+- **Positive:** Operators can enable/disable adapters and update tool name mappings at runtime without restarting the server. `hide_wrapped_tools` gives control over what the model sees. The UI surfaces adapter cards under each MCP server entry.
+- **Negative:** Operators must verify that `tool_mappings` values match the actual tool names loaded by `MultiServerMCPClient` for their server version. A mismatch silently produces no adapter tools (adapter skips missing MCP tools gracefully).
+- **Key files:** `extensions_config.json`, `extensions_config.example.json`, `deerflow/config/extensions_config.py` (`AdapterConfig`), `app/gateway/routers/adapters.py`
+
+---
+
+## ADR-019: Adapter Tools Are Compatible with All Three Sandbox Modes
+
+**Status:** Accepted
+**Date:** 2026-04-27
+
+### Context
+
+DeerFlow supports three sandbox execution modes, each with a different filesystem layout for per-thread data:
+
+- **Local** (`LocalSandboxProvider`) — thread data lives at `backend/.deer-flow/threads/{thread_id}/user-data/{workspace,uploads,outputs}` on the host filesystem.
+- **Docker / AIO** (`AioSandboxProvider`) — thread data is mounted inside a Docker container; host paths are mapped in via volume mounts.
+- **Provisioner / Kubernetes** — thread data lives on a remote provisioned sandbox; paths are resolved through the provisioner URL.
+
+In all three modes, the agent works with virtual paths (`/mnt/user-data/workspace`, `/mnt/user-data/uploads`, `/mnt/user-data/outputs`). `ThreadDataMiddleware` populates `runtime.state["thread_data"]` with the actual host paths for the current thread before any tool is called.
+
+Adapter tools must work correctly in all three modes without mode-specific code.
+
+### Decision
+
+Adapter tools reuse the same virtual path resolution utilities already used by all sandbox built-in tools (`bash`, `read_file`, `write_file`):
+
+- `get_thread_data(runtime)` — extracts `thread_data` from the LangGraph runtime state. Returns `None` if not present (e.g. in unit tests).
+- `replace_virtual_path(path, thread_data)` — translates a `/mnt/user-data/...` virtual path to the real host path for the current thread. Identity function if `thread_data` is `None` or the path is already absolute and non-virtual.
+- `mask_local_paths_in_output(result, thread_data)` — replaces all real host path occurrences in a result string with their virtual equivalents, so the model always sees virtual paths regardless of the underlying provider.
+
+Because all three sandbox modes populate `thread_data` with `workspace_path`, `uploads_path`, and `outputs_path` before tool execution, adapter tools automatically work correctly in all modes. No adapter code branches on sandbox mode.
+
+### Alternatives considered
+
+- **Passing real paths directly to adapters:** Would couple adapter tools to the physical layout of a specific sandbox mode. The agent would need to know real paths, defeating the virtual path abstraction.
+- **Adapter-specific path configuration:** A separate config field for adapter working directories. Redundant — `thread_data` already contains everything needed.
+
+### Consequences
+
+- **Positive:** Adapter tools are sandbox-mode agnostic. Local development, Docker dev, and Kubernetes production all work identically. No adapter code changes are needed when switching modes.
+- **Negative:** Adapter tools require that `ThreadDataMiddleware` has run before they are called (i.e. they must be called within a LangGraph agent invocation). Direct invocation outside the agent context requires a `SimpleNamespace` runtime stub (as done in tests).
+- **Constraint:** If `thread_data` is `None` (e.g. the middleware did not run), `replace_virtual_path` returns the path unchanged. Adapter tools will attempt to operate on the virtual path as-is, which will fail with a file-not-found error — a clear and diagnosable failure mode.
+
+---
+
 *ADRs.md — Phase 1: Business Domain Integration*
 *Created: 2026-04-05*
