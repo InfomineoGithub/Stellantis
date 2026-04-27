@@ -319,6 +319,10 @@ export const zhCN: Translations = {
     tools: {
       title: "工具",
       description: "管理 MCP 工具的配置和启用状态。",
+      adapterHideRaw: "隐藏原始",
+      adapterEnable: "启用",
+      adapterDescriptionHideRaw: "对模型隐藏原始 MCP 工具。",
+      adapterDescriptionShowRaw: "原始 MCP 工具与此适配器一起保持可见。",
     },
     skills: {
       title: "技能",
