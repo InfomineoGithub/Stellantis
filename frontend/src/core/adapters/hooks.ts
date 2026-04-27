@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import { loadAdaptersConfig, updateAdaptersConfig } from "./api";
 import type { AdaptersConfig } from "./types";
 

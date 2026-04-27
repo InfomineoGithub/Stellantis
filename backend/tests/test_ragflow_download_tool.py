@@ -2,14 +2,11 @@ import base64
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
-import pytest
 
 
 def _make_download_mcp(content_bytes: bytes) -> MagicMock:
     mock = MagicMock()
-    mock.invoke.return_value = json.dumps(
-        {"content_base64": base64.b64encode(content_bytes).decode()}
-    )
+    mock.invoke.return_value = json.dumps({"content_base64": base64.b64encode(content_bytes).decode()})
     return mock
 
 
@@ -83,8 +80,9 @@ def test_download_creates_output_dir_if_missing(tmp_path):
 
 
 def test_make_download_tool_returns_basetool():
-    from deerflow.tools.adapters.ragflow.download import make_download_tool
     from langchain.tools import BaseTool
+
+    from deerflow.tools.adapters.ragflow.download import make_download_tool
 
     tool = make_download_tool(MagicMock())
     assert isinstance(tool, BaseTool)
@@ -97,6 +95,7 @@ def test_make_download_tool_translates_virtual_output_dir(tmp_path):
     import base64
     import json
     from types import SimpleNamespace
+
     from deerflow.tools.adapters.ragflow.download import make_download_tool
 
     workspace = tmp_path / "workspace"
@@ -110,9 +109,7 @@ def test_make_download_tool_translates_virtual_output_dir(tmp_path):
 
     content = b"file bytes"
     mock_mcp = MagicMock()
-    mock_mcp.invoke.return_value = json.dumps(
-        {"content_base64": base64.b64encode(content).decode()}
-    )
+    mock_mcp.invoke.return_value = json.dumps({"content_base64": base64.b64encode(content).decode()})
     tool = make_download_tool(mock_mcp)
 
     result = tool.func(

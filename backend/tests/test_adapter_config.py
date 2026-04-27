@@ -1,6 +1,4 @@
-import json
-import pytest
-from deerflow.config.extensions_config import ExtensionsConfig, AdapterConfig
+from deerflow.config.extensions_config import AdapterConfig, ExtensionsConfig
 
 
 def test_adapter_config_defaults():

@@ -8,11 +8,11 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
+import { useAdaptersConfig, useUpdateAdapter } from "@/core/adapters/hooks";
+import type { AdaptersConfig } from "@/core/adapters/types";
 import { useI18n } from "@/core/i18n/hooks";
 import { useMCPConfig, useEnableMCPServer } from "@/core/mcp/hooks";
 import type { MCPServerConfig } from "@/core/mcp/types";
-import { useAdaptersConfig, useUpdateAdapter } from "@/core/adapters/hooks";
-import type { AdaptersConfig } from "@/core/adapters/types";
 import { env } from "@/env";
 
 import { SettingsSection } from "./settings-section";

@@ -1,7 +1,8 @@
 import base64
 import json
 from pathlib import Path
-from langchain.tools import BaseTool, tool, ToolRuntime
+
+from langchain.tools import BaseTool, ToolRuntime, tool
 
 
 def _do_upload(
@@ -49,7 +50,7 @@ def make_upload_tool(upload_mcp: BaseTool) -> BaseTool:
         Returns:
             JSON string with uploaded document info: id, name, progress (0.0–1.0), etc.
         """
-        from deerflow.sandbox.tools import get_thread_data, replace_virtual_path, mask_local_paths_in_output
+        from deerflow.sandbox.tools import get_thread_data, mask_local_paths_in_output, replace_virtual_path
 
         thread_data = get_thread_data(runtime)
         actual_path = replace_virtual_path(path, thread_data)

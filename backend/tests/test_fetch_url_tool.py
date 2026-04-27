@@ -1,31 +1,36 @@
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 
 def test_detect_type_pdf():
     from deerflow.tools.adapters.fetch_url.tool import _detect_type
+
     assert _detect_type("https://example.com/report.pdf") == "pdf"
 
 
 def test_detect_type_docx():
     from deerflow.tools.adapters.fetch_url.tool import _detect_type
+
     assert _detect_type("https://example.com/doc.docx") == "docx"
 
 
 def test_detect_type_xlsx():
     from deerflow.tools.adapters.fetch_url.tool import _detect_type
+
     assert _detect_type("https://example.com/sheet.xlsx") == "xlsx"
 
 
 def test_detect_type_pptx():
     from deerflow.tools.adapters.fetch_url.tool import _detect_type
+
     assert _detect_type("https://example.com/slide.pptx") == "pptx"
 
 
 def test_detect_type_webpage_default():
     from deerflow.tools.adapters.fetch_url.tool import _detect_type
+
     assert _detect_type("https://example.com/page") == "webpage"
     assert _detect_type("https://example.com/") == "webpage"
     assert _detect_type("https://example.com/page.html") == "webpage"
@@ -69,8 +74,8 @@ def test_fetch_webpage_type_hint_overrides_detection(tmp_path):
 
 
 def test_fetch_file_download_saves_bytes(tmp_path):
+
     from deerflow.tools.adapters.fetch_url.tool import _do_fetch
-    import httpx
 
     mock_mcp = MagicMock()
     output_dir = tmp_path / "files"
@@ -97,8 +102,8 @@ def test_fetch_file_download_saves_bytes(tmp_path):
 
 
 def test_fetch_file_download_uses_content_disposition_filename(tmp_path):
+
     from deerflow.tools.adapters.fetch_url.tool import _do_fetch
-    import httpx
 
     mock_mcp = MagicMock()
     output_dir = tmp_path / "files"
@@ -136,8 +141,9 @@ def test_fetch_video_raises_not_implemented(tmp_path):
 
 
 def test_make_fetch_url_tool_returns_basetool():
-    from deerflow.tools.adapters.fetch_url.tool import make_fetch_url_tool
     from langchain.tools import BaseTool
+
+    from deerflow.tools.adapters.fetch_url.tool import make_fetch_url_tool
 
     tool = make_fetch_url_tool(MagicMock())
     assert isinstance(tool, BaseTool)
@@ -148,6 +154,7 @@ def test_make_fetch_url_tool_returns_basetool():
 def test_make_fetch_url_tool_translates_virtual_output_dir(tmp_path):
     """make_fetch_url_tool wrapper must resolve /mnt/user-data/ virtual output_dir."""
     from types import SimpleNamespace
+
     from deerflow.tools.adapters.fetch_url.tool import make_fetch_url_tool
 
     workspace = tmp_path / "workspace"

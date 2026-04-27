@@ -1,5 +1,5 @@
-import importlib
 from unittest.mock import MagicMock, patch
+
 from deerflow.config.extensions_config import AdapterConfig, ExtensionsConfig
 
 
@@ -25,9 +25,7 @@ def test_load_adapter_tools_returns_empty_when_no_adapters():
 def test_load_adapter_tools_skips_disabled_adapters():
     from deerflow.tools.adapters import load_adapter_tools
 
-    config = _make_config(
-        {"ragflow_builtin": {"enabled": False, "wraps_server": "ragflow", "tool_mappings": {}}}
-    )
+    config = _make_config({"ragflow_builtin": {"enabled": False, "wraps_server": "ragflow", "tool_mappings": {}}})
     mcp_tools = [_make_mcp_tool("ragflow__upload_with_metadata")]
     adapter_tools, visible_mcp = load_adapter_tools(config, mcp_tools)
     assert adapter_tools == []
@@ -91,16 +89,15 @@ def test_load_adapter_tools_keeps_all_mcp_when_hide_false():
 def test_load_adapter_tools_skips_unknown_registry_adapters():
     from deerflow.tools.adapters import load_adapter_tools
 
-    config = _make_config(
-        {"unknown_adapter": {"enabled": True, "wraps_server": "foo", "tool_mappings": {}}}
-    )
+    config = _make_config({"unknown_adapter": {"enabled": True, "wraps_server": "foo", "tool_mappings": {}}})
     mcp_tools = [_make_mcp_tool("foo__tool")]
     adapter_tools, visible_mcp = load_adapter_tools(config, mcp_tools)
     assert adapter_tools == []
     assert len(visible_mcp) == 1
+
+
 def test_ragflow_adapter_get_tools_returns_two_tools():
     from deerflow.tools.adapters.ragflow import get_tools
-    from deerflow.config.extensions_config import AdapterConfig
 
     cfg = AdapterConfig(
         enabled=True,
@@ -122,7 +119,6 @@ def test_ragflow_adapter_get_tools_returns_two_tools():
 
 def test_ragflow_adapter_skips_missing_mcp_tools():
     from deerflow.tools.adapters.ragflow import get_tools
-    from deerflow.config.extensions_config import AdapterConfig
 
     cfg = AdapterConfig(
         enabled=True,
@@ -130,9 +126,10 @@ def test_ragflow_adapter_skips_missing_mcp_tools():
     )
     tools = get_tools(cfg, [])  # no MCP tools available
     assert tools == []
+
+
 def test_fetch_url_adapter_get_tools_returns_one_tool():
     from deerflow.tools.adapters.fetch_url import get_tools
-    from deerflow.config.extensions_config import AdapterConfig
 
     cfg = AdapterConfig(
         enabled=True,
@@ -147,7 +144,6 @@ def test_fetch_url_adapter_get_tools_returns_one_tool():
 
 def test_fetch_url_adapter_returns_empty_when_mcp_missing():
     from deerflow.tools.adapters.fetch_url import get_tools
-    from deerflow.config.extensions_config import AdapterConfig
 
     cfg = AdapterConfig(
         enabled=True,

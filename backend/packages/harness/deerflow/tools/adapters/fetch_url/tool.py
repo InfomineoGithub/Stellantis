@@ -1,6 +1,7 @@
 import urllib.parse
 from pathlib import Path
-from langchain.tools import BaseTool, tool, ToolRuntime
+
+from langchain.tools import BaseTool, ToolRuntime, tool
 
 _FILE_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx"}
 
@@ -41,10 +42,7 @@ def _do_fetch(
         # Detect: YouTube URLs, .mp4/.webm extensions
         # Call <cloudflare_video_transcript_tool_name> MCP tool when available
         # Save transcript as <slug>.txt, return path
-        raise NotImplementedError(
-            "Video transcript not yet supported. "
-            "Add cloudflare video tool call here when the tool is available."
-        )
+        raise NotImplementedError("Video transcript not yet supported. Add cloudflare video tool call here when the tool is available.")
 
     # File download (pdf, docx, xlsx, pptx)
     import httpx
@@ -86,7 +84,7 @@ def make_fetch_url_tool(webpage_mcp: BaseTool) -> BaseTool:
         Returns:
             Saved file path as a /mnt/user-data/... virtual path.
         """
-        from deerflow.sandbox.tools import get_thread_data, replace_virtual_path, mask_local_paths_in_output
+        from deerflow.sandbox.tools import get_thread_data, mask_local_paths_in_output, replace_virtual_path
 
         thread_data = get_thread_data(runtime)
         actual_output_dir = replace_virtual_path(output_dir, thread_data)

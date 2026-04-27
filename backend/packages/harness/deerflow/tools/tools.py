@@ -60,7 +60,7 @@ def get_available_tools(
                 mcp_tools = get_cached_mcp_tools()
                 if mcp_tools:
                     logger.info(f"Using {len(mcp_tools)} cached MCP tool(s)")
-            
+
             adapter_tools, mcp_tools = load_adapter_tools(extensions_config, mcp_tools)
         except ImportError:
             logger.warning("MCP module not available. Install 'langchain-mcp-adapters' package to enable MCP tools.")

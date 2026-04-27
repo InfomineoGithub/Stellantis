@@ -1,7 +1,8 @@
 import base64
 import json
 from pathlib import Path
-from langchain.tools import BaseTool, tool, ToolRuntime
+
+from langchain.tools import BaseTool, ToolRuntime, tool
 
 
 def _do_download(
@@ -49,7 +50,7 @@ def make_download_tool(download_mcp: BaseTool) -> BaseTool:
         Returns:
             JSON array of saved file paths (as /mnt/user-data/... virtual paths).
         """
-        from deerflow.sandbox.tools import get_thread_data, replace_virtual_path, mask_local_paths_in_output
+        from deerflow.sandbox.tools import get_thread_data, mask_local_paths_in_output, replace_virtual_path
 
         thread_data = get_thread_data(runtime)
         actual_output_dir = replace_virtual_path(output_dir, thread_data)

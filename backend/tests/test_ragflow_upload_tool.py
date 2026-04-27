@@ -1,8 +1,6 @@
 import base64
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
-import pytest
 
 
 def _make_upload_mcp(return_value: str) -> MagicMock:
@@ -62,8 +60,9 @@ def test_upload_passes_metadata(tmp_path):
 
 
 def test_make_upload_tool_returns_basetool():
-    from deerflow.tools.adapters.ragflow.upload import make_upload_tool
     from langchain.tools import BaseTool
+
+    from deerflow.tools.adapters.ragflow.upload import make_upload_tool
 
     mock_mcp = MagicMock()
     tool = make_upload_tool(mock_mcp)
@@ -76,6 +75,7 @@ def test_make_upload_tool_returns_basetool():
 def test_make_upload_tool_translates_virtual_path(tmp_path):
     """make_upload_tool wrapper must resolve /mnt/user-data/ virtual paths."""
     from types import SimpleNamespace
+
     from deerflow.tools.adapters.ragflow.upload import make_upload_tool
 
     workspace = tmp_path / "workspace"

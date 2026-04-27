@@ -1,5 +1,6 @@
-import { getBackendBaseURL } from "@/core/config";
 import { fetchWithAuth } from "@/core/api/auth-fetch";
+import { getBackendBaseURL } from "@/core/config";
+
 import type { AdaptersConfig } from "./types";
 
 export async function loadAdaptersConfig(): Promise<AdaptersConfig> {

@@ -1,4 +1,5 @@
 from langchain.tools import BaseTool
+
 from deerflow.config.extensions_config import AdapterConfig
 from deerflow.tools.adapters.fetch_url.tool import make_fetch_url_tool
 

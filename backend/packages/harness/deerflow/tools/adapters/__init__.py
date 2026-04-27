@@ -1,5 +1,7 @@
 import importlib
+
 from langchain.tools import BaseTool
+
 from deerflow.config.extensions_config import ExtensionsConfig
 
 ADAPTER_REGISTRY: dict[str, str] = {
