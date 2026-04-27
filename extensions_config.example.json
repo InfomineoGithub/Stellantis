@@ -38,5 +38,24 @@
       "description": "PostgreSQL database access"
     }
   },
-  "skills": {}
+  "skills": {},
+  "adapters": {
+    "ragflow_builtin": {
+      "enabled": false,
+      "wraps_server": "ragflow",
+      "hide_wrapped_tools": false,
+      "tool_mappings": {
+        "upload": "ragflow__upload_with_metadata",
+        "download": "ragflow__download_attachment"
+      }
+    },
+    "fetch_url": {
+      "enabled": false,
+      "wraps_server": "cloudflare",
+      "hide_wrapped_tools": false,
+      "tool_mappings": {
+        "webpage": "cloudflare__browser_render_markdown"
+      }
+    }
+  }
 }
