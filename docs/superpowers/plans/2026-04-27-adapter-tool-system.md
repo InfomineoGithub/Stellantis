@@ -6,6 +6,8 @@
 
 **Architecture:** A new `tools/adapters/` package in the harness provides self-contained adapter modules, each exposing `get_tools(adapter_config, mcp_tools) -> list[BaseTool]`. An `AdapterConfig` Pydantic model added to `ExtensionsConfig` drives which adapters are enabled and whether raw MCP tools are hidden. The loader is called from `get_available_tools()` after MCP tools are fetched.
 
+**Path resolution:** The model always works with virtual paths (`/mnt/user-data/workspace`, `/mnt/user-data/outputs`). Actual host paths live in `runtime.state["thread_data"]` (populated by `ThreadDataMiddleware`). All adapter tools accept `runtime: ToolRuntime`, translate input paths via `replace_virtual_path(path, thread_data)` before use, and mask output paths back to virtual via `mask_local_paths_in_output(result, thread_data)` before returning. The `_do_*` implementation functions always receive and return actual host paths — only the `make_*_tool` wrappers do translation.
+
 **Tech Stack:** Python 3.12, LangChain `BaseTool` + `@tool` decorator, Pydantic v2, FastAPI, httpx, Next.js (React Query + TypeScript), JSON config.
 
 ---
@@ -408,6 +410,42 @@ def test_make_upload_tool_returns_basetool():
     tool = make_upload_tool(mock_mcp)
     assert isinstance(tool, BaseTool)
     assert tool.name == "ragflow_upload"
+    # runtime is LangGraph-injected — must NOT appear in the LLM-visible schema
+    assert "runtime" not in tool.args
+
+
+def test_make_upload_tool_translates_virtual_path(tmp_path):
+    """make_upload_tool wrapper must resolve /mnt/user-data/ virtual paths."""
+    from types import SimpleNamespace
+    from deerflow.tools.adapters.ragflow.upload import make_upload_tool
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_file = workspace / "doc.pdf"
+    test_file.write_bytes(b"content")
+
+    thread_data = {
+        "workspace_path": str(workspace),
+        "uploads_path": str(tmp_path / "uploads"),
+        "outputs_path": str(tmp_path / "outputs"),
+    }
+    runtime = SimpleNamespace(state={"thread_data": thread_data}, context={})
+
+    mock_mcp = MagicMock()
+    mock_mcp.invoke.return_value = '{"id": "doc-1"}'
+    tool = make_upload_tool(mock_mcp)
+
+    # Tool is called with virtual path; should resolve to actual workspace file
+    result = tool.func(
+        runtime=runtime,
+        path="/mnt/user-data/workspace/doc.pdf",
+        dataset_id="ds-1",
+    )
+
+    call_args = mock_mcp.invoke.call_args[0][0]
+    # Actual host path was passed to MCP — not the virtual path
+    assert "/mnt/user-data" not in call_args.get("file_content_base64", "")
+    assert result  # masked output returned
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -425,7 +463,7 @@ Expected: `FAILED` — module not found.
 import base64
 import json
 from pathlib import Path
-from langchain.tools import BaseTool, tool
+from langchain.tools import BaseTool, tool, ToolRuntime
 
 
 def _do_upload(
@@ -453,6 +491,7 @@ def _do_upload(
 def make_upload_tool(upload_mcp: BaseTool) -> BaseTool:
     @tool("ragflow_upload", parse_docstring=True)
     def ragflow_upload(
+        runtime: ToolRuntime,
         path: str,
         dataset_id: str,
         filename: str | None = None,
@@ -464,7 +503,7 @@ def make_upload_tool(upload_mcp: BaseTool) -> BaseTool:
         in the agent workspace. Handles base64 encoding internally.
 
         Args:
-            path: Absolute path to the file in the agent workspace.
+            path: Path to the file (use /mnt/user-data/workspace/... paths).
             dataset_id: Target RAGFlow dataset (knowledge base) ID.
             filename: Override filename sent to RAGFlow (defaults to the file's basename).
             metadata: Optional metadata dict (str/int/float/bool/list values only).
@@ -472,7 +511,12 @@ def make_upload_tool(upload_mcp: BaseTool) -> BaseTool:
         Returns:
             JSON string with uploaded document info: id, name, progress (0.0–1.0), etc.
         """
-        return _do_upload(path, dataset_id, filename, metadata, upload_mcp)
+        from deerflow.sandbox.tools import get_thread_data, replace_virtual_path, mask_local_paths_in_output
+
+        thread_data = get_thread_data(runtime)
+        actual_path = replace_virtual_path(path, thread_data)
+        result = _do_upload(actual_path, dataset_id, filename, metadata, upload_mcp)
+        return mask_local_paths_in_output(result, thread_data)
 
     return ragflow_upload
 ```
@@ -595,6 +639,45 @@ def test_make_download_tool_returns_basetool():
     tool = make_download_tool(MagicMock())
     assert isinstance(tool, BaseTool)
     assert tool.name == "ragflow_download"
+    assert "runtime" not in tool.args
+
+
+def test_make_download_tool_translates_virtual_output_dir(tmp_path):
+    """make_download_tool wrapper must resolve /mnt/user-data/ virtual output_dir."""
+    import base64
+    import json
+    from types import SimpleNamespace
+    from deerflow.tools.adapters.ragflow.download import make_download_tool
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    thread_data = {
+        "workspace_path": str(workspace),
+        "uploads_path": str(tmp_path / "uploads"),
+        "outputs_path": str(tmp_path / "outputs"),
+    }
+    runtime = SimpleNamespace(state={"thread_data": thread_data}, context={})
+
+    content = b"file bytes"
+    mock_mcp = MagicMock()
+    mock_mcp.invoke.return_value = json.dumps(
+        {"content_base64": base64.b64encode(content).decode()}
+    )
+    tool = make_download_tool(mock_mcp)
+
+    result = tool.func(
+        runtime=runtime,
+        doc_ids=["doc-1"],
+        output_dir="/mnt/user-data/workspace",
+        filenames=["report.pdf"],
+    )
+
+    # File must be saved inside actual workspace dir
+    saved = workspace / "report.pdf"
+    assert saved.exists()
+    assert saved.read_bytes() == content
+    # Returned path must be virtual (masked)
+    assert "/mnt/user-data" in result
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -612,7 +695,7 @@ Expected: `FAILED` — module not found.
 import base64
 import json
 from pathlib import Path
-from langchain.tools import BaseTool, tool
+from langchain.tools import BaseTool, tool, ToolRuntime
 
 
 def _do_download(
@@ -640,6 +723,7 @@ def _do_download(
 def make_download_tool(download_mcp: BaseTool) -> BaseTool:
     @tool("ragflow_download", parse_docstring=True)
     def ragflow_download(
+        runtime: ToolRuntime,
         doc_ids: list[str],
         output_dir: str,
         filenames: list[str] | None = None,
@@ -652,14 +736,19 @@ def make_download_tool(download_mcp: BaseTool) -> BaseTool:
 
         Args:
             doc_ids: List of RAGFlow document IDs to download.
-            output_dir: Absolute path to the directory where files will be saved.
+            output_dir: Directory to save files into (use /mnt/user-data/workspace/... paths).
             filenames: Optional list of filenames parallel to doc_ids. If omitted,
                        the doc_id is used as the filename (no extension).
 
         Returns:
-            JSON array of absolute paths where each file was saved.
+            JSON array of saved file paths (as /mnt/user-data/... virtual paths).
         """
-        return _do_download(doc_ids, output_dir, filenames, download_mcp)
+        from deerflow.sandbox.tools import get_thread_data, replace_virtual_path, mask_local_paths_in_output
+
+        thread_data = get_thread_data(runtime)
+        actual_output_dir = replace_virtual_path(output_dir, thread_data)
+        result = _do_download(doc_ids, actual_output_dir, filenames, download_mcp)
+        return mask_local_paths_in_output(result, thread_data)
 
     return ragflow_download
 ```
@@ -898,6 +987,40 @@ def test_make_fetch_url_tool_returns_basetool():
     tool = make_fetch_url_tool(MagicMock())
     assert isinstance(tool, BaseTool)
     assert tool.name == "fetch_url"
+    assert "runtime" not in tool.args
+
+
+def test_make_fetch_url_tool_translates_virtual_output_dir(tmp_path):
+    """make_fetch_url_tool wrapper must resolve /mnt/user-data/ virtual output_dir."""
+    from types import SimpleNamespace
+    from deerflow.tools.adapters.fetch_url.tool import make_fetch_url_tool
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    thread_data = {
+        "workspace_path": str(workspace),
+        "uploads_path": str(tmp_path / "uploads"),
+        "outputs_path": str(tmp_path / "outputs"),
+    }
+    runtime = SimpleNamespace(state={"thread_data": thread_data}, context={})
+
+    mock_mcp = MagicMock()
+    mock_mcp.invoke.return_value = "# Page content"
+    tool = make_fetch_url_tool(mock_mcp)
+
+    result = tool.func(
+        runtime=runtime,
+        url="https://example.com/page",
+        output_dir="/mnt/user-data/workspace",
+        type="webpage",
+    )
+
+    # File must be saved inside actual workspace dir
+    saved_files = list(workspace.glob("*.md"))
+    assert len(saved_files) == 1
+    assert saved_files[0].read_text() == "# Page content"
+    # Returned path must be virtual (masked)
+    assert "/mnt/user-data" in result
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -914,7 +1037,7 @@ Expected: `FAILED` — module not found.
 # backend/packages/harness/deerflow/tools/adapters/fetch_url/tool.py
 import urllib.parse
 from pathlib import Path
-from langchain.tools import BaseTool, tool
+from langchain.tools import BaseTool, tool, ToolRuntime
 
 _FILE_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx"}
 
@@ -980,6 +1103,7 @@ def _do_fetch(
 def make_fetch_url_tool(webpage_mcp: BaseTool) -> BaseTool:
     @tool("fetch_url", parse_docstring=True)
     def fetch_url(
+        runtime: ToolRuntime,
         url: str,
         output_dir: str,
         type: str | None = None,
@@ -992,14 +1116,19 @@ def make_fetch_url_tool(webpage_mcp: BaseTool) -> BaseTool:
 
         Args:
             url: The URL to fetch.
-            output_dir: Absolute path to the directory where the file will be saved.
+            output_dir: Directory to save into (use /mnt/user-data/workspace/... paths).
             type: Content type hint: "webpage", "pdf", "docx", "xlsx", "pptx".
                   Omit to auto-detect from URL extension (defaults to "webpage").
 
         Returns:
-            Absolute path to the saved file.
+            Saved file path as a /mnt/user-data/... virtual path.
         """
-        return _do_fetch(url, output_dir, type, webpage_mcp)
+        from deerflow.sandbox.tools import get_thread_data, replace_virtual_path, mask_local_paths_in_output
+
+        thread_data = get_thread_data(runtime)
+        actual_output_dir = replace_virtual_path(output_dir, thread_data)
+        result = _do_fetch(url, actual_output_dir, type, webpage_mcp)
+        return mask_local_paths_in_output(result, thread_data)
 
     return fetch_url
 ```
