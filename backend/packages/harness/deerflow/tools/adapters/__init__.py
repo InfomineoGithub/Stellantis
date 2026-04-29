@@ -7,6 +7,7 @@ from deerflow.config.extensions_config import ExtensionsConfig
 ADAPTER_REGISTRY: dict[str, str] = {
     "ragflow_builtin": "deerflow.tools.adapters.ragflow",
     "fetch_url": "deerflow.tools.adapters.fetch_url",
+    "fetch_webpage": "deerflow.tools.adapters.fetch_webpage",
 }
 
 
@@ -33,7 +34,7 @@ def load_adapter_tools(
         module = importlib.import_module(module_path)
         adapter_tools.extend(module.get_tools(adapter_config, mcp_tools))
 
-        if adapter_config.hide_wrapped_tools :
+        if adapter_config.hide_wrapped_tools:
             for mcp_tool_name in adapter_config.tool_mappings.values():
                 visible_mcp_tools = [t for t in visible_mcp_tools if t.name != mcp_tool_name]
         print("visible_mcp_tools", [t.name for t in visible_mcp_tools])
