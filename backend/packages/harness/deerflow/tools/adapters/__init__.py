@@ -33,8 +33,8 @@ def load_adapter_tools(
         module = importlib.import_module(module_path)
         adapter_tools.extend(module.get_tools(adapter_config, mcp_tools))
 
-        if adapter_config.hide_wrapped_tools and adapter_config.wraps_server:
-            prefix = adapter_config.wraps_server + "_"
-            visible_mcp_tools = [t for t in visible_mcp_tools if not t.name.startswith(prefix)]
-
+        if adapter_config.hide_wrapped_tools :
+            for mcp_tool_name in adapter_config.tool_mappings.values():
+                visible_mcp_tools = [t for t in visible_mcp_tools if t.name != mcp_tool_name]
+        print("visible_mcp_tools", [t.name for t in visible_mcp_tools])
     return adapter_tools, visible_mcp_tools

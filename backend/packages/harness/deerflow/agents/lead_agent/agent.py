@@ -23,12 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Curated skill whitelist for the default lead agent.
 # Only fundamental DeerFlow skills are included; add here sparingly.
-_DEFAULT_LEAD_AGENT_SKILLS: set[str] = {
-    "deep-research",  # Systematic multi-angle research methodology
-    "bootstrap",  # Agent personality onboarding (SOUL.md creation)
-    "find-skills",  # Discover & install additional skills from the ecosystem
-}
-
+_DEFAULT_LEAD_AGENT_SKILLS: set[str] | None = None
 
 def _resolve_model_name(requested_model_name: str | None = None) -> str:
     """Resolve a runtime model name safely, falling back to default if invalid. Returns None if no models are configured."""

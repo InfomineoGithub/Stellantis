@@ -5,6 +5,7 @@ from langchain.tools import ToolRuntime, tool
 from langgraph.typing import ContextT
 
 from deerflow.agents.thread_state import ThreadDataState, ThreadState
+from deerflow.config.app_config import get_app_config
 from deerflow.config.paths import VIRTUAL_PATH_PREFIX
 from deerflow.sandbox.exceptions import (
     SandboxError,
@@ -77,6 +78,17 @@ def _thread_virtual_to_actual_mappings(thread_data: ThreadDataState) -> dict[str
     if outputs:
         mappings[f"{VIRTUAL_PATH_PREFIX}/outputs"] = outputs
 
+    # Map skills
+    try:
+        config = get_app_config()
+        skills = config.skills
+        if skills:
+            skills_actual = str(skills.get_skills_path())
+            skills_virtual = skills.container_path
+            mappings[skills_virtual] = skills_actual
+    except Exception:
+        pass
+
     # Also map the virtual root when all known dirs share the same parent.
     actual_dirs = [Path(p) for p in (workspace, uploads, outputs) if p]
     if actual_dirs:
@@ -124,23 +136,34 @@ def mask_local_paths_in_output(output: str, thread_data: ThreadDataState | None)
 def resolve_local_tool_path(path: str, thread_data: ThreadDataState | None) -> str:
     """Resolve and validate a local-sandbox tool path.
 
-    Only virtual paths under /mnt/user-data are allowed in local mode.
+    Virtual paths under user data and skills directory are allowed in local mode.
     """
     if thread_data is None:
         raise SandboxRuntimeError("Thread data not available for local sandbox")
 
-    if not path.startswith(f"{VIRTUAL_PATH_PREFIX}/"):
-        raise PermissionError(f"Only paths under {VIRTUAL_PATH_PREFIX}/ are allowed")
+    skills_virtual = "/mnt/skills"
+    skills_actual = None
+    try:
+        config = get_app_config()
+        skills_virtual = config.skills.container_path
+        skills_actual = str(config.skills.get_skills_path())
+    except Exception:
+        pass
+
+    if not path.startswith(f"{VIRTUAL_PATH_PREFIX}/") and not path.startswith(f"{skills_virtual}/"):
+        raise PermissionError(f"Only paths under {VIRTUAL_PATH_PREFIX}/ or {skills_virtual}/ are allowed")
 
     resolved_path = replace_virtual_path(path, thread_data)
     resolved = Path(resolved_path).resolve()
 
+    # Build the allowed physical roots for resolving against path traversal
     allowed_roots = [
         Path(p).resolve()
         for p in (
             thread_data.get("workspace_path"),
             thread_data.get("uploads_path"),
             thread_data.get("outputs_path"),
+            skills_actual,
         )
         if p is not None
     ]
@@ -161,17 +184,25 @@ def resolve_local_tool_path(path: str, thread_data: ThreadDataState | None) -> s
 def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState | None) -> None:
     """Validate absolute paths in local-sandbox bash commands.
 
-    In local mode, commands must use virtual paths under /mnt/user-data for
-    user data access. A small allowlist of common system path prefixes is kept
-    for executable and device references (e.g. /bin/sh, /dev/null).
+    In local mode, commands must use virtual paths under /mnt/user-data or /mnt/skills.
+    A small allowlist of common system path prefixes is kept for executables and devices.
     """
     if thread_data is None:
         raise SandboxRuntimeError("Thread data not available for local sandbox")
+
+    skills_virtual = "/mnt/skills"
+    try:
+        skills_virtual = get_app_config().skills.container_path
+    except Exception:
+        pass
 
     unsafe_paths: list[str] = []
 
     for absolute_path in _ABSOLUTE_PATH_PATTERN.findall(command):
         if absolute_path == VIRTUAL_PATH_PREFIX or absolute_path.startswith(f"{VIRTUAL_PATH_PREFIX}/"):
+            continue
+
+        if absolute_path == skills_virtual or absolute_path.startswith(f"{skills_virtual}/"):
             continue
 
         if any(absolute_path == prefix.rstrip("/") or absolute_path.startswith(prefix) for prefix in _LOCAL_BASH_SYSTEM_PATH_PREFIXES):
@@ -181,11 +212,11 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
 
     if unsafe_paths:
         unsafe = ", ".join(sorted(dict.fromkeys(unsafe_paths)))
-        raise PermissionError(f"Unsafe absolute paths in command: {unsafe}. Use paths under {VIRTUAL_PATH_PREFIX}")
+        raise PermissionError(f"Unsafe absolute paths in command: {unsafe}. Use paths under {VIRTUAL_PATH_PREFIX} or {skills_virtual}")
 
 
 def replace_virtual_paths_in_command(command: str, thread_data: ThreadDataState | None) -> str:
-    """Replace all virtual /mnt/user-data paths in a command string.
+    """Replace all virtual paths in a command string.
 
     Args:
         command: The command string that may contain virtual paths.
@@ -194,20 +225,33 @@ def replace_virtual_paths_in_command(command: str, thread_data: ThreadDataState 
     Returns:
         The command with all virtual paths replaced.
     """
-    if VIRTUAL_PATH_PREFIX not in command:
-        return command
-
     if thread_data is None:
         return command
 
-    # Pattern to match /mnt/user-data followed by path characters
-    pattern = re.compile(rf"{re.escape(VIRTUAL_PATH_PREFIX)}(/[^\s\"';&|<>()]*)?")
+    skills_virtual = "/mnt/skills"
+    try:
+        skills_virtual = get_app_config().skills.container_path
+    except Exception:
+        pass
 
-    def replace_match(match: re.Match) -> str:
-        full_path = match.group(0)
-        return replace_virtual_path(full_path, thread_data)
+    if VIRTUAL_PATH_PREFIX not in command and skills_virtual not in command:
+        return command
 
-    return pattern.sub(replace_match, command)
+    mappings = _thread_virtual_to_actual_mappings(thread_data)
+    
+    # We replace longest paths first to avoid partial matches
+    result = command
+    for virtual_base, actual_base in sorted(mappings.items(), key=lambda item: len(item[0]), reverse=True):
+        if virtual_base not in result:
+            continue
+        escaped_virtual = re.escape(virtual_base)
+        pattern = re.compile(rf"{escaped_virtual}(/[^\s\"';&|<>()]*)?")
+        def replace_match(match: re.Match) -> str:
+            full_path = match.group(0)
+            return replace_virtual_path(full_path, thread_data)
+        result = pattern.sub(replace_match, result)
+
+    return result
 
 
 def get_thread_data(runtime: ToolRuntime[ContextT, ThreadState] | None) -> ThreadDataState | None:

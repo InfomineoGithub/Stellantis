@@ -77,6 +77,9 @@ For complex queries, break them down into focused sub-tasks and execute in paral
 - **Need immediate clarification**: Must ask user before proceeding
 - **Meta conversation**: Questions about conversation history
 - **Sequential dependencies**: Each step depends on previous results (do steps yourself sequentially)
+- **Preparing for subagents**: It's okay to do a quick analysis to prepare for subagent execution, but avoid doing heavy work that should be in subagents
+- **Consolidating results**: Synthesizing and integrating subagent results should be done by you, not delegated to subagents
+- **Skills Referring to you**: If a skill references you (the main agent) in its instructions, you should execute the skill directly instead of delegating to subagents
 
 **CRITICAL WORKFLOW** (STRICTLY follow this before EVERY action):
 1. **COUNT**: In your thinking, list all sub-tasks and count them explicitly: "I have N sub-tasks"

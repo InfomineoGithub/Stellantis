@@ -1,5 +1,6 @@
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -36,14 +37,14 @@ def test_detect_type_webpage_default():
     assert _detect_type("https://example.com/page.html") == "webpage"
 
 
-def test_fetch_webpage_saves_markdown(tmp_path):
+async def test_fetch_webpage_saves_markdown(tmp_path):
     from deerflow.tools.adapters.fetch_url.tool import _do_fetch
 
-    mock_mcp = MagicMock()
-    mock_mcp.invoke.return_value = "# Hello\nSome content."
+    mock_mcp = AsyncMock()
+    mock_mcp.ainvoke.return_value = "# Hello\nSome content."
     output_dir = tmp_path / "out"
 
-    result = _do_fetch(
+    result = await _do_fetch(
         url="https://example.com/page",
         output_dir=str(output_dir),
         content_type=None,
@@ -52,17 +53,17 @@ def test_fetch_webpage_saves_markdown(tmp_path):
 
     assert result.endswith(".md")
     assert Path(result).read_text() == "# Hello\nSome content."
-    mock_mcp.invoke.assert_called_once_with({"url": "https://example.com/page"})
+    mock_mcp.ainvoke.assert_called_once_with({"url": "https://example.com/page"})
 
 
-def test_fetch_webpage_type_hint_overrides_detection(tmp_path):
+async def test_fetch_webpage_type_hint_overrides_detection(tmp_path):
     from deerflow.tools.adapters.fetch_url.tool import _do_fetch
 
-    mock_mcp = MagicMock()
-    mock_mcp.invoke.return_value = "markdown content"
+    mock_mcp = AsyncMock()
+    mock_mcp.ainvoke.return_value = "markdown content"
 
     # URL looks like PDF but type hint says webpage
-    result = _do_fetch(
+    result = await _do_fetch(
         url="https://example.com/report.pdf",
         output_dir=str(tmp_path),
         content_type="webpage",
@@ -70,14 +71,13 @@ def test_fetch_webpage_type_hint_overrides_detection(tmp_path):
     )
 
     assert result.endswith(".md")
-    mock_mcp.invoke.assert_called_once()
+    mock_mcp.ainvoke.assert_called_once()
 
 
-def test_fetch_file_download_saves_bytes(tmp_path):
-
+async def test_fetch_file_download_saves_bytes(tmp_path):
     from deerflow.tools.adapters.fetch_url.tool import _do_fetch
 
-    mock_mcp = MagicMock()
+    mock_mcp = AsyncMock()
     output_dir = tmp_path / "files"
 
     mock_response = MagicMock()
@@ -85,12 +85,13 @@ def test_fetch_file_download_saves_bytes(tmp_path):
     mock_response.content = b"pdf bytes here"
     mock_response.raise_for_status = MagicMock()
 
-    with patch("httpx.Client") as mock_client_cls:
-        mock_client = MagicMock()
-        mock_client_cls.return_value.__enter__.return_value = mock_client
-        mock_client.get.return_value = mock_response
+    mock_async_client = AsyncMock()
+    mock_async_client.__aenter__.return_value = mock_async_client
+    mock_async_client.__aexit__.return_value = None
+    mock_async_client.get = AsyncMock(return_value=mock_response)
 
-        result = _do_fetch(
+    with patch("httpx.AsyncClient", return_value=mock_async_client):
+        result = await _do_fetch(
             url="https://example.com/report.pdf",
             output_dir=str(output_dir),
             content_type="pdf",
@@ -101,11 +102,10 @@ def test_fetch_file_download_saves_bytes(tmp_path):
     assert Path(result).read_bytes() == b"pdf bytes here"
 
 
-def test_fetch_file_download_uses_content_disposition_filename(tmp_path):
-
+async def test_fetch_file_download_uses_content_disposition_filename(tmp_path):
     from deerflow.tools.adapters.fetch_url.tool import _do_fetch
 
-    mock_mcp = MagicMock()
+    mock_mcp = AsyncMock()
     output_dir = tmp_path / "files"
 
     mock_response = MagicMock()
@@ -113,12 +113,13 @@ def test_fetch_file_download_uses_content_disposition_filename(tmp_path):
     mock_response.content = b"data"
     mock_response.raise_for_status = MagicMock()
 
-    with patch("httpx.Client") as mock_client_cls:
-        mock_client = MagicMock()
-        mock_client_cls.return_value.__enter__.return_value = mock_client
-        mock_client.get.return_value = mock_response
+    mock_async_client = AsyncMock()
+    mock_async_client.__aenter__.return_value = mock_async_client
+    mock_async_client.__aexit__.return_value = None
+    mock_async_client.get = AsyncMock(return_value=mock_response)
 
-        result = _do_fetch(
+    with patch("httpx.AsyncClient", return_value=mock_async_client):
+        result = await _do_fetch(
             url="https://example.com/download",
             output_dir=str(output_dir),
             content_type="pdf",
@@ -128,15 +129,15 @@ def test_fetch_file_download_uses_content_disposition_filename(tmp_path):
     assert Path(result).name == "server_name.pdf"
 
 
-def test_fetch_video_raises_not_implemented(tmp_path):
+async def test_fetch_video_raises_not_implemented(tmp_path):
     from deerflow.tools.adapters.fetch_url.tool import _do_fetch
 
     with pytest.raises(NotImplementedError, match="Video transcript not yet supported"):
-        _do_fetch(
+        await _do_fetch(
             url="https://youtube.com/watch?v=abc",
             output_dir=str(tmp_path),
             content_type="video",
-            webpage_mcp=MagicMock(),
+            webpage_mcp=AsyncMock(),
         )
 
 
@@ -151,7 +152,7 @@ def test_make_fetch_url_tool_returns_basetool():
     assert "runtime" not in tool.args
 
 
-def test_make_fetch_url_tool_translates_virtual_output_dir(tmp_path):
+async def test_make_fetch_url_tool_translates_virtual_output_dir(tmp_path):
     """make_fetch_url_tool wrapper must resolve /mnt/user-data/ virtual output_dir."""
     from types import SimpleNamespace
 
@@ -166,11 +167,11 @@ def test_make_fetch_url_tool_translates_virtual_output_dir(tmp_path):
     }
     runtime = SimpleNamespace(state={"thread_data": thread_data}, context={})
 
-    mock_mcp = MagicMock()
-    mock_mcp.invoke.return_value = "# Page content"
+    mock_mcp = AsyncMock()
+    mock_mcp.ainvoke.return_value = "# Page content"
     tool = make_fetch_url_tool(mock_mcp)
 
-    result = tool.func(
+    result = await tool.coroutine(
         runtime=runtime,
         url="https://example.com/page",
         output_dir="/mnt/user-data/workspace",

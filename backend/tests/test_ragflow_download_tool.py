@@ -1,23 +1,23 @@
 import base64
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
-def _make_download_mcp(content_bytes: bytes) -> MagicMock:
-    mock = MagicMock()
-    mock.invoke.return_value = json.dumps({"content_base64": base64.b64encode(content_bytes).decode()})
+def _make_download_mcp(content_bytes: bytes) -> AsyncMock:
+    mock = AsyncMock()
+    mock.ainvoke.return_value = json.dumps({"content_base64": base64.b64encode(content_bytes).decode()})
     return mock
 
 
-def test_download_saves_file_to_output_dir(tmp_path):
+async def test_download_saves_file_to_output_dir(tmp_path):
     from deerflow.tools.adapters.ragflow.download import _do_download
 
     content = b"fake file content"
     mock_mcp = _make_download_mcp(content)
     output_dir = tmp_path / "downloads"
 
-    result_str = _do_download(
+    result_str = await _do_download(
         doc_ids=["doc-123"],
         output_dir=str(output_dir),
         filenames=["report.pdf"],
@@ -32,13 +32,13 @@ def test_download_saves_file_to_output_dir(tmp_path):
     assert saved.name == "report.pdf"
 
 
-def test_download_multiple_docs(tmp_path):
+async def test_download_multiple_docs(tmp_path):
     from deerflow.tools.adapters.ragflow.download import _do_download
 
     mock_mcp = _make_download_mcp(b"data")
     output_dir = tmp_path / "out"
 
-    result_str = _do_download(
+    result_str = await _do_download(
         doc_ids=["doc-1", "doc-2"],
         output_dir=str(output_dir),
         filenames=["a.pdf", "b.docx"],
@@ -47,16 +47,16 @@ def test_download_multiple_docs(tmp_path):
 
     saved_paths = json.loads(result_str)
     assert len(saved_paths) == 2
-    assert mock_mcp.invoke.call_count == 2
+    assert mock_mcp.ainvoke.call_count == 2
 
 
-def test_download_falls_back_to_doc_id_as_filename(tmp_path):
+async def test_download_falls_back_to_doc_id_as_filename(tmp_path):
     from deerflow.tools.adapters.ragflow.download import _do_download
 
     mock_mcp = _make_download_mcp(b"data")
     output_dir = tmp_path / "out"
 
-    result_str = _do_download(
+    result_str = await _do_download(
         doc_ids=["doc-abc"],
         output_dir=str(output_dir),
         filenames=None,
@@ -67,14 +67,14 @@ def test_download_falls_back_to_doc_id_as_filename(tmp_path):
     assert Path(saved_paths[0]).name == "doc-abc"
 
 
-def test_download_creates_output_dir_if_missing(tmp_path):
+async def test_download_creates_output_dir_if_missing(tmp_path):
     from deerflow.tools.adapters.ragflow.download import _do_download
 
     mock_mcp = _make_download_mcp(b"x")
     output_dir = tmp_path / "nested" / "dir"
     assert not output_dir.exists()
 
-    _do_download(["doc-1"], str(output_dir), ["f.txt"], mock_mcp)
+    await _do_download(["doc-1"], str(output_dir), ["f.txt"], mock_mcp)
 
     assert output_dir.exists()
 
@@ -90,7 +90,7 @@ def test_make_download_tool_returns_basetool():
     assert "runtime" not in tool.args
 
 
-def test_make_download_tool_translates_virtual_output_dir(tmp_path):
+async def test_make_download_tool_translates_virtual_output_dir(tmp_path):
     """make_download_tool wrapper must resolve /mnt/user-data/ virtual output_dir."""
     import base64
     import json
@@ -108,11 +108,11 @@ def test_make_download_tool_translates_virtual_output_dir(tmp_path):
     runtime = SimpleNamespace(state={"thread_data": thread_data}, context={})
 
     content = b"file bytes"
-    mock_mcp = MagicMock()
-    mock_mcp.invoke.return_value = json.dumps({"content_base64": base64.b64encode(content).decode()})
+    mock_mcp = AsyncMock()
+    mock_mcp.ainvoke.return_value = json.dumps({"content_base64": base64.b64encode(content).decode()})
     tool = make_download_tool(mock_mcp)
 
-    result = tool.func(
+    result = await tool.coroutine(
         runtime=runtime,
         doc_ids=["doc-1"],
         output_dir="/mnt/user-data/workspace",

@@ -5,7 +5,7 @@ from pathlib import Path
 from langchain.tools import BaseTool, ToolRuntime, tool
 
 
-def _do_upload(
+async def _do_upload(
     path: str,
     dataset_id: str,
     filename: str | None,
@@ -16,7 +16,7 @@ def _do_upload(
     resolved_filename = filename or file_path.name
     file_bytes = file_path.read_bytes()
     content_b64 = base64.b64encode(file_bytes).decode()
-    result = upload_mcp.invoke(
+    result = await upload_mcp.ainvoke(
         {
             "dataset_id": dataset_id,
             "filename": resolved_filename,
@@ -29,7 +29,7 @@ def _do_upload(
 
 def make_upload_tool(upload_mcp: BaseTool) -> BaseTool:
     @tool("ragflow_upload", parse_docstring=True)
-    def ragflow_upload(
+    async def ragflow_upload(
         runtime: ToolRuntime,
         path: str,
         dataset_id: str,
@@ -54,7 +54,7 @@ def make_upload_tool(upload_mcp: BaseTool) -> BaseTool:
 
         thread_data = get_thread_data(runtime)
         actual_path = replace_virtual_path(path, thread_data)
-        result = _do_upload(actual_path, dataset_id, filename, metadata, upload_mcp)
+        result = await _do_upload(actual_path, dataset_id, filename, metadata, upload_mcp)
         return mask_local_paths_in_output(result, thread_data)
 
     return ragflow_upload

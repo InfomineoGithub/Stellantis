@@ -21,7 +21,7 @@ def _slug_from_url(url: str) -> str:
     return slug[:60] or "page"
 
 
-def _do_fetch(
+async def _do_fetch(
     url: str,
     output_dir: str,
     content_type: str | None,
@@ -30,11 +30,26 @@ def _do_fetch(
     detected = content_type or _detect_type(url)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    print("url : ", url)
+    print("content_type : ", content_type)
 
     if detected == "webpage":
-        markdown = webpage_mcp.invoke({"url": url})
+        markdown = await webpage_mcp.ainvoke({"url": url})
+        
+        if isinstance(markdown, str):
+            import json
+            try:
+                parsed_md = json.loads(markdown)
+                if isinstance(parsed_md, list):
+                    markdown = parsed_md
+            except Exception:
+                pass
+                
+        if isinstance(markdown, list) and len(markdown) > 0 and isinstance(markdown[0], dict) and "text" in markdown[0]:
+            markdown = markdown[0]["text"]
+            
         out_file = output_path / f"{_slug_from_url(url)}.md"
-        out_file.write_text(markdown if isinstance(markdown, str) else str(markdown))
+        out_file.write_text(markdown if isinstance(markdown, str) else str(markdown), encoding="utf-8")
         return out_file.as_posix()
 
     if detected == "video":
@@ -49,8 +64,8 @@ def _do_fetch(
 
     filename = Path(urllib.parse.urlparse(url).path).name or f"download.{detected}"
 
-    with httpx.Client(follow_redirects=True) as client:
-        response = client.get(url)
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        response = await client.get(url)
         response.raise_for_status()
         cd = response.headers.get("Content-Disposition", "")
         if "filename=" in cd:
@@ -63,7 +78,7 @@ def _do_fetch(
 
 def make_fetch_url_tool(webpage_mcp: BaseTool) -> BaseTool:
     @tool("fetch_url", parse_docstring=True)
-    def fetch_url(
+    async def fetch_url(
         runtime: ToolRuntime,
         url: str,
         output_dir: str,
@@ -88,7 +103,7 @@ def make_fetch_url_tool(webpage_mcp: BaseTool) -> BaseTool:
 
         thread_data = get_thread_data(runtime)
         actual_output_dir = replace_virtual_path(output_dir, thread_data)
-        result = _do_fetch(url, actual_output_dir, type, webpage_mcp)
+        result = await _do_fetch(url, actual_output_dir, type, webpage_mcp)
         return mask_local_paths_in_output(result, thread_data)
 
     return fetch_url

@@ -97,6 +97,10 @@ class TestLiveStreaming:
 
 
 class TestLiveToolUse:
+    @pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="Requires POSIX shell (bash/sh) — not available on Windows",
+    )
     def test_agent_uses_bash_tool(self, client):
         """Agent uses bash tool when asked to run a command."""
         events = list(client.stream("Use the bash tool to run: echo 'LIVE_TEST_OK'. Then tell me the output."))

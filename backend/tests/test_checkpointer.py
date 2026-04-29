@@ -19,7 +19,11 @@ def reset_state():
     """Reset singleton state before each test."""
     set_checkpointer_config(None)
     reset_checkpointer()
-    yield
+    # Patch get_app_config so loading config.yaml does not overwrite the
+    # explicitly-set (None) checkpointer config in tests that rely on
+    # InMemorySaver as the default.
+    with patch("deerflow.agents.checkpointer.provider.get_app_config"):
+        yield
     set_checkpointer_config(None)
     reset_checkpointer()
 

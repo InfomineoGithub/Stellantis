@@ -98,6 +98,45 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
             return user_msg if user_msg else "New Conversation"
 
     @override
+    def after_model(self, state: TitleMiddlewareState, runtime: Runtime) -> dict | None:
+        """Generate and set thread title after the first agent response (sync path)."""
+        if not self._should_generate_title(state):
+            return None
+
+        config = get_title_config()
+        messages = state.get("messages", [])
+
+        user_msg_content = next((m.content for m in messages if m.type == "human"), "")
+        assistant_msg_content = next((m.content for m in messages if m.type == "ai"), "")
+
+        user_msg = self._normalize_content(user_msg_content)
+        assistant_msg = self._normalize_content(assistant_msg_content)
+
+        model = create_chat_model(thinking_enabled=False)
+
+        prompt = config.prompt_template.format(
+            max_words=config.max_words,
+            user_msg=user_msg[:500],
+            assistant_msg=assistant_msg[:500],
+        )
+
+        try:
+            response = model.invoke(prompt)
+            title_content = self._normalize_content(response.content)
+            title = title_content.strip().strip('"').strip("'")
+            title = title[: config.max_chars] if len(title) > config.max_chars else title
+        except Exception as e:
+            print(f"Failed to generate title: {e}")
+            fallback_chars = min(config.max_chars, 50)
+            if len(user_msg) > fallback_chars:
+                title = user_msg[:fallback_chars].rstrip() + "..."
+            else:
+                title = user_msg if user_msg else "New Conversation"
+
+        print(f"Generated thread title: {title}")
+        return {"title": title}
+
+    @override
     async def aafter_model(self, state: TitleMiddlewareState, runtime: Runtime) -> dict | None:
         """Generate and set thread title after the first agent response."""
         if self._should_generate_title(state):
