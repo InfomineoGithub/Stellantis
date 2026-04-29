@@ -43,6 +43,14 @@ class McpServerConfig(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict, description="HTTP headers to send (for sse or http type)")
     oauth: McpOAuthConfig | None = Field(default=None, description="OAuth configuration (for sse or http type)")
     description: str = Field(default="", description="Human-readable description of what this MCP server provides")
+    include_tools: list[str] | None = Field(
+        default=None,
+        description="Allowlist of tool names (without server prefix) to load from this server. If set, only these tools are loaded.",
+    )
+    exclude_tools: list[str] | None = Field(
+        default=None,
+        description="Denylist of tool names (without server prefix) to exclude from this server. Applied after include_tools.",
+    )
     model_config = ConfigDict(extra="allow")
 
 
