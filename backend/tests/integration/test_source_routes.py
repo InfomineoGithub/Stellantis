@@ -7,6 +7,7 @@ from app.gateway.app import app
 from app.services.source_service import SourceService
 from tests.fakes.source_repository import InMemorySourceRepository
 from tests.fakes.vehicle_repository import InMemoryVehicleRepository
+from tests.integration.conftest import auth_headers
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +23,11 @@ def override_repos():
 
 @pytest_asyncio.fixture
 async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers=auth_headers(),
+    ) as c:
         yield c
 
 

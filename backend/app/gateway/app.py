@@ -28,6 +28,8 @@ from app.gateway.routers import (
     threads,
     uploads,
 )
+from app.routers import sources as sources_router
+from app.routers import vehicles as vehicles_router
 from deerflow.config import app_config as deerflow_app_config
 from deerflow.config.app_config import apply_logging_level
 
@@ -372,6 +374,10 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
 
     # Stateless Runs API (stream/wait without a pre-existing thread)
     app.include_router(runs.router)
+
+    # Business domain routers (vehicles + sources)
+    app.include_router(vehicles_router.router)
+    app.include_router(sources_router.router)
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict:
