@@ -7,7 +7,9 @@ test.describe("Landing page", () => {
     await page.goto("/");
 
     // Nav brand name
-    await expect(page.locator("nav", { hasText: "Stellantis AI" })).toBeVisible();
+    await expect(
+      page.locator("nav", { hasText: "Stellantis AI" }),
+    ).toBeVisible();
 
     // "Bypass Protocol" CTA button (dev/auth-disabled access)
     await expect(
