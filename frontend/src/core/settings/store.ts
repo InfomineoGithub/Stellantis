@@ -141,7 +141,7 @@ export function updateThreadSettings<K extends keyof LocalSettings>(
     Object.prototype.hasOwnProperty.call(value, "model_name")
   ) {
     const contextValue = value as Partial<LocalSettings["context"]>;
-    const threadModelName = contextValue.model_name;
+    const threadModelName = contextValue.model_name as string | undefined;
     threadModelNames.set(threadId, threadModelName);
     saveThreadModelName(threadId, threadModelName);
   }

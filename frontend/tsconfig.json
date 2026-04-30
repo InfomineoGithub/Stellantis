@@ -48,6 +48,7 @@
     "src/app/blog",
     "src/content",
     "src/core/blog",
+    "src/components/landing",
     "src/mdx-components.ts",
     "tests/e2e",
     "tests/unit",
