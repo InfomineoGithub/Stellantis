@@ -7,7 +7,6 @@ import { getLangGraphBaseURL } from "../config";
 import { getAuthHeaders, clearJwtTokenCache } from "./auth-fetch";
 import { sanitizeRunStreamOptions } from "./stream-mode";
 
-
 function createCompatibleClient(isMock?: boolean): LangGraphClient {
   const client = new LangGraphClient({
     apiUrl: getLangGraphBaseURL(isMock),
@@ -25,7 +24,6 @@ function createCompatibleClient(isMock?: boolean): LangGraphClient {
       };
     },
   });
-
 
   const originalRunStream = client.runs.stream.bind(client.runs);
   client.runs.stream = ((threadId, assistantId, payload) =>

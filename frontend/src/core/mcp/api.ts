@@ -9,7 +9,8 @@ export async function loadMCPConfig() {
 }
 
 export async function updateMCPConfig(config: MCPConfig) {
-  const response = await fetchWithAuth(`${getBackendBaseURL()}/api/mcp/config`,
+  const response = await fetchWithAuth(
+    `${getBackendBaseURL()}/api/mcp/config`,
     {
       method: "PUT",
       headers: {

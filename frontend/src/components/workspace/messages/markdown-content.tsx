@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import type { AnchorHTMLAttributes } from "react";
 
-
 import {
   MessageResponse,
   type MessageResponseProps,
@@ -32,7 +31,9 @@ export function MarkdownContent({
 }: MarkdownContentProps) {
   const components = useMemo(() => {
     return {
-      p: (props: React.HTMLAttributes<HTMLDivElement>) => <div {...props} className={cn("mb-2 last:mb-0", props.className)} />,
+      p: (props: React.HTMLAttributes<HTMLDivElement>) => (
+        <div {...props} className={cn("mb-2 last:mb-0", props.className)} />
+      ),
       a: (props: AnchorHTMLAttributes<HTMLAnchorElement>) => {
         if (typeof props.children === "string") {
           const match = /^citation:(.+)$/.exec(props.children);

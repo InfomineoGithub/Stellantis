@@ -73,11 +73,20 @@ export function useSourceVehicles(id: string | null | undefined) {
 export function useLinkVehicle() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ sourceId, vehicleId }: { sourceId: string; vehicleId: string }) =>
-      linkVehicleToSource(sourceId, vehicleId),
+    mutationFn: ({
+      sourceId,
+      vehicleId,
+    }: {
+      sourceId: string;
+      vehicleId: string;
+    }) => linkVehicleToSource(sourceId, vehicleId),
     onSuccess: (_data, { sourceId, vehicleId }) => {
-      void queryClient.invalidateQueries({ queryKey: sourceKeys.vehicles(sourceId) });
-      void queryClient.invalidateQueries({ queryKey: vehicleKeys.withSources(vehicleId) });
+      void queryClient.invalidateQueries({
+        queryKey: sourceKeys.vehicles(sourceId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: vehicleKeys.withSources(vehicleId),
+      });
     },
   });
 }
@@ -85,11 +94,20 @@ export function useLinkVehicle() {
 export function useUnlinkVehicle() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ sourceId, vehicleId }: { sourceId: string; vehicleId: string }) =>
-      unlinkVehicleFromSource(sourceId, vehicleId),
+    mutationFn: ({
+      sourceId,
+      vehicleId,
+    }: {
+      sourceId: string;
+      vehicleId: string;
+    }) => unlinkVehicleFromSource(sourceId, vehicleId),
     onSuccess: (_data, { sourceId, vehicleId }) => {
-      void queryClient.invalidateQueries({ queryKey: sourceKeys.vehicles(sourceId) });
-      void queryClient.invalidateQueries({ queryKey: vehicleKeys.withSources(vehicleId) });
+      void queryClient.invalidateQueries({
+        queryKey: sourceKeys.vehicles(sourceId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: vehicleKeys.withSources(vehicleId),
+      });
     },
   });
 }

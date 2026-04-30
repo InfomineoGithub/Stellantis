@@ -28,7 +28,10 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
   return res.json() as Promise<Source>;
 }
 
-export async function updateSource(id: string, input: UpdateSourceInput): Promise<Source> {
+export async function updateSource(
+  id: string,
+  input: UpdateSourceInput,
+): Promise<Source> {
   const res = await fetchWithAuth(`${BASE()}/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -46,20 +49,34 @@ export async function deleteSource(id: string): Promise<void> {
 export async function fetchSourceVehicles(id: string): Promise<Vehicle[]> {
   const res = await fetchWithAuth(`${BASE()}/${id}/vehicles`);
   if (!res.ok)
-    throw new Error(`Failed to fetch vehicles for source '${id}': ${res.statusText}`);
+    throw new Error(
+      `Failed to fetch vehicles for source '${id}': ${res.statusText}`,
+    );
   return res.json() as Promise<Vehicle[]>;
 }
 
-export async function linkVehicleToSource(sourceId: string, vehicleId: string): Promise<void> {
-  const res = await fetchWithAuth(`${BASE()}/${sourceId}/vehicles/${vehicleId}`, {
-    method: "POST",
-  });
+export async function linkVehicleToSource(
+  sourceId: string,
+  vehicleId: string,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    `${BASE()}/${sourceId}/vehicles/${vehicleId}`,
+    {
+      method: "POST",
+    },
+  );
   if (!res.ok) throw new Error(`Failed to link vehicle: ${res.statusText}`);
 }
 
-export async function unlinkVehicleFromSource(sourceId: string, vehicleId: string): Promise<void> {
-  const res = await fetchWithAuth(`${BASE()}/${sourceId}/vehicles/${vehicleId}`, {
-    method: "DELETE",
-  });
+export async function unlinkVehicleFromSource(
+  sourceId: string,
+  vehicleId: string,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    `${BASE()}/${sourceId}/vehicles/${vehicleId}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (!res.ok) throw new Error(`Failed to unlink vehicle: ${res.statusText}`);
 }

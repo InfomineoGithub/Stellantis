@@ -5,10 +5,7 @@ export const Button = ({
   className,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-  <button
-    className={`transition-all duration-300 ${className}`}
-    {...props}
-  >
+  <button className={`transition-all duration-300 ${className}`} {...props}>
     {children}
   </button>
 );

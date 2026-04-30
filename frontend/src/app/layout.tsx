@@ -41,7 +41,6 @@ export default async function RootLayout({
     >
       <head />
       <body>
-
         <ThemeProvider attribute="class" enableSystem disableTransitionOnChange>
           <I18nProvider initialLocale={locale}>{children}</I18nProvider>
         </ThemeProvider>
