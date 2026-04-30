@@ -1,16 +1,43 @@
 #!/usr/bin/env bash
 #
-# deploy.sh - Build and start (or stop) DeerFlow production services
+# deploy.sh - Build, start, or stop DeerFlow production services
 #
-# Usage:
-#   deploy.sh [up]   — build images and start containers (default)
-#   deploy.sh down   — stop and remove containers
+# Commands:
+#   deploy.sh                    — build + start
+#   deploy.sh build              — build all images (mode-agnostic)
+#   deploy.sh start              — start from pre-built images
+#   deploy.sh down               — stop and remove containers
+#
+# Sandbox mode (local / aio / provisioner) is auto-detected from config.yaml.
+#
+# Examples:
+#   deploy.sh                    # build + start
+#   deploy.sh build              # build all images
+#   deploy.sh start              # start pre-built images
+#   deploy.sh down               # stop and remove containers
 #
 # Must be run from the repo root directory.
 
 set -e
 
-CMD="${1:-up}"
+case "${1:-}" in
+    build|start|down)
+        CMD="$1"
+        if [ -n "${2:-}" ]; then
+            echo "Unknown argument: $2"
+            echo "Usage: deploy.sh [build|start|down]"
+            exit 1
+        fi
+        ;;
+    "")
+        CMD=""
+        ;;
+    *)
+        echo "Unknown argument: $1"
+        echo "Usage: deploy.sh [build|start|down]"
+        exit 1
+        ;;
+esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -50,11 +77,11 @@ if [ ! -f "$DEER_FLOW_CONFIG_PATH" ]; then
         cp "$REPO_ROOT/config.example.yaml" "$DEER_FLOW_CONFIG_PATH"
         echo -e "${GREEN}✓ Seeded config.example.yaml → $DEER_FLOW_CONFIG_PATH${NC}"
         echo -e "${YELLOW}⚠ config.yaml was seeded from the example template.${NC}"
-        echo "  Edit $DEER_FLOW_CONFIG_PATH and set your model API keys before use."
+        echo "  Run 'make setup' to generate a minimal config, or edit $DEER_FLOW_CONFIG_PATH manually before use."
     else
         echo -e "${RED}✗ No config.yaml found.${NC}"
-        echo "  Run 'make config' from the repo root to generate one,"
-        echo "  then set the required model API keys."
+        echo "  Run 'make setup' from the repo root (recommended),"
+        echo "  or 'make config' for the full template, then set the required model API keys."
         exit 1
     fi
 else
@@ -150,6 +177,32 @@ if [ "$CMD" = "down" ]; then
     exit 0
 fi
 
+# ── build ────────────────────────────────────────────────────────────────────
+# Build produces mode-agnostic images. No --gateway or sandbox detection needed.
+
+if [ "$CMD" = "build" ]; then
+    echo "=========================================="
+    echo "  DeerFlow — Building Images"
+    echo "=========================================="
+    echo ""
+
+    # Docker socket is needed for compose to parse volume specs
+    if [ -z "$DEER_FLOW_DOCKER_SOCKET" ]; then
+        export DEER_FLOW_DOCKER_SOCKET="/var/run/docker.sock"
+    fi
+
+    "${COMPOSE_CMD[@]}" build
+
+    echo ""
+    echo "=========================================="
+    echo "  ✓ Images built successfully"
+    echo "=========================================="
+    echo ""
+    echo "  Next: deploy.sh start"
+    echo ""
+    exit 0
+fi
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 
 echo "=========================================="
@@ -157,19 +210,19 @@ echo "  DeerFlow Production Deployment"
 echo "=========================================="
 echo ""
 
-# ── Step 1: Detect sandbox mode ──────────────────────────────────────────────
+# ── Detect runtime configuration ────────────────────────────────────────────
+# Only needed for start / up — determines whether provisioner is launched.
 
 sandbox_mode="$(detect_sandbox_mode)"
 echo -e "${BLUE}Sandbox mode: $sandbox_mode${NC}"
 
-if [ "$sandbox_mode" = "provisioner" ]; then
-    services=""
-    extra_args="--profile provisioner"
-else
-    services="frontend gateway langgraph nginx"
-    extra_args=""
-fi
+echo -e "${BLUE}Runtime: Gateway embedded agent runtime${NC}"
 
+services="frontend gateway nginx"
+
+if [ "$sandbox_mode" = "provisioner" ]; then
+    services="$services provisioner"
+fi
 
 # ── DEER_FLOW_DOCKER_SOCKET ───────────────────────────────────────────────────
 
@@ -189,13 +242,20 @@ fi
 
 echo ""
 
-# ── Step 2: Build and start ───────────────────────────────────────────────────
+# ── Start / Up ───────────────────────────────────────────────────────────────
 
-echo "Building images and starting containers..."
-echo ""
-
-# shellcheck disable=SC2086
-"${COMPOSE_CMD[@]}" $extra_args up --build -d --remove-orphans $services
+if [ "$CMD" = "start" ]; then
+    echo "Starting containers (no rebuild)..."
+    echo ""
+    # shellcheck disable=SC2086
+    "${COMPOSE_CMD[@]}" up -d --remove-orphans $services
+else
+    # Default: build + start
+    echo "Building images and starting containers..."
+    echo ""
+    # shellcheck disable=SC2086
+    "${COMPOSE_CMD[@]}" up --build -d --remove-orphans $services
+fi
 
 echo ""
 echo "=========================================="
@@ -204,7 +264,8 @@ echo "=========================================="
 echo ""
 echo "  🌐 Application: http://localhost:${PORT:-2026}"
 echo "  📡 API Gateway: http://localhost:${PORT:-2026}/api/*"
-echo "  🤖 LangGraph:   http://localhost:${PORT:-2026}/api/langgraph/*"
+echo "  🤖 Runtime:     Gateway embedded"
+echo "  API:            /api/langgraph/* → Gateway"
 echo ""
 echo "  Manage:"
 echo "    make down        — stop and remove containers"
