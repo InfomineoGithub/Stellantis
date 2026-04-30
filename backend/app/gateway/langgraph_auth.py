@@ -52,12 +52,33 @@ def _check_csrf(request) -> None:
 
 @auth.authenticate
 async def authenticate(request):
-    """Validate the session cookie, decode JWT, and check token_version.
+    """Validate the session cookie or Bearer JWT, and check CSRF for cookies.
 
-    Same validation chain as Gateway's get_current_user_from_request:
-      cookie → decode JWT → DB lookup → token_version match
-    Also enforces CSRF on state-changing methods.
+    Resolution order:
+    1. ``Authorization: Bearer <token>`` — Better Auth JWT (HS256 via
+       BETTER_AUTH_SECRET or EdDSA via JWKS).  CSRF is inherently safe for
+       Bearer auth so the check is skipped.
+    2. ``access_token`` cookie — custom local auth system.  CSRF is enforced
+       on state-changing methods.
+
+    Same validation chain as Gateway's AuthMiddleware.
     """
+    # ── 1. Bearer JWT (Better Auth tokens from the frontend) ─────────────
+    auth_header = getattr(request, "headers", {}).get("authorization") or getattr(request, "headers", {}).get("Authorization") or ""
+    if auth_header.startswith("Bearer "):
+        bearer_token = auth_header[7:]
+        try:
+            from jwt_auth.verifier import verify_jwt
+
+            payload = verify_jwt(bearer_token)
+        except Exception as exc:
+            raise Auth.exceptions.HTTPException(
+                status_code=401,
+                detail=f"Bearer token invalid: {exc}",
+            )
+        return payload.get("sub") or payload.get("email") or "anonymous"
+
+    # ── 2. Cookie-based session auth ─────────────────────────────────────
     # CSRF check before authentication so forged cross-site requests
     # are rejected early, even if the cookie carries a valid JWT.
     _check_csrf(request)
