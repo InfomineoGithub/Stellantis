@@ -28,6 +28,9 @@ _PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     "/docs",
     "/redoc",
     "/openapi.json",
+    # Better Auth endpoints are handled by Next.js; if they reach the
+    # gateway (e.g. direct access without nginx) they must pass through.
+    "/api/auth/",
 )
 
 # Exact auth paths that are public (login/register/status check).
