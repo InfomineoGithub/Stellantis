@@ -11,9 +11,9 @@ import asyncio
 import logging
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from alembic import context
 from deerflow.persistence.base import Base
 
 # Import all models so metadata is populated.
