@@ -41,8 +41,9 @@ export function SubtaskCard({
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(true);
   const rehypePlugins = useRehypeSplitWordsIntoSpans(isLoading);
-  const task = useSubtask(taskId)!;
+  const task = useSubtask(taskId);
   const icon = useMemo(() => {
+    if (!task) return undefined;
     if (task.status === "completed") {
       return <CheckCircleIcon className="size-3" />;
     } else if (task.status === "failed") {
@@ -50,7 +51,8 @@ export function SubtaskCard({
     } else if (task.status === "in_progress") {
       return <Loader2Icon className="size-3 animate-spin" />;
     }
-  }, [task.status]);
+  }, [task?.status]);
+  if (!task) return null;
   return (
     <ChainOfThought
       className={cn("relative w-full gap-2 rounded-lg border py-0", className)}
@@ -105,8 +107,8 @@ export function SubtaskCard({
                       uniqueKey={task.latestMessage?.id ?? ""}
                     >
                       {task.status === "in_progress" &&
-                      task.latestMessage &&
-                      hasToolCalls(task.latestMessage)
+                        task.latestMessage &&
+                        hasToolCalls(task.latestMessage)
                         ? explainLastToolCall(task.latestMessage, t)
                         : t.subtasks[task.status]}
                     </FlipDisplay>

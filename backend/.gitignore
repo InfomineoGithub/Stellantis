@@ -26,3 +26,9 @@ config.yaml
 
 # Claude Code settings
 .claude/settings.local.json
+
+# Local state
+.deer-flow/
+*.db
+*.sqlite
+*.sqlite3
