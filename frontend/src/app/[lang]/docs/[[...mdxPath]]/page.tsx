@@ -10,7 +10,7 @@ export async function generateMetadata(props) {
   return metadata;
 }
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
+ 
 const Wrapper = getMDXComponents().wrapper;
 
 export default async function Page(props) {

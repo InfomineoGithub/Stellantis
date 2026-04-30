@@ -4,7 +4,7 @@ import { getI18n } from "@/core/i18n/server";
 
 import { useMDXComponents as getMDXComponents } from "../../../mdx-components";
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
+ 
 const Wrapper = getMDXComponents().wrapper;
 
 export const metadata = {
