@@ -12,3 +12,6 @@ lint:
 
 format:
 	pnpm format:write
+
+test:
+	pnpm test

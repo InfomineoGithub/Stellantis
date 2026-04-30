@@ -11,6 +11,8 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from deerflow.config.app_config import AppConfig
+
 logger = logging.getLogger(__name__)
 
 _MISSING_TOOL_CALL_ID = "missing_tool_call_id"
@@ -67,11 +69,13 @@ class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
 def _build_runtime_middlewares(
     *,
+    app_config: AppConfig,
     include_uploads: bool,
     include_dangling_tool_call_patch: bool,
     lazy_init: bool = True,
 ) -> list[AgentMiddleware]:
     """Build shared base middlewares for agent execution."""
+    from deerflow.agents.middlewares.llm_error_handling_middleware import LLMErrorHandlingMiddleware
     from deerflow.agents.middlewares.thread_data_middleware import ThreadDataMiddleware
     from deerflow.sandbox.middleware import SandboxMiddleware
 
@@ -90,23 +94,53 @@ def _build_runtime_middlewares(
 
         middlewares.append(DanglingToolCallMiddleware())
 
+    middlewares.append(LLMErrorHandlingMiddleware(app_config=app_config))
+
+    # Guardrail middleware (if configured)
+    guardrails_config = app_config.guardrails
+    if guardrails_config.enabled and guardrails_config.provider:
+        import inspect
+
+        from deerflow.guardrails.middleware import GuardrailMiddleware
+        from deerflow.reflection import resolve_variable
+
+        provider_cls = resolve_variable(guardrails_config.provider.use)
+        provider_kwargs = dict(guardrails_config.provider.config) if guardrails_config.provider.config else {}
+        # Pass framework hint if the provider accepts it (e.g. for config discovery).
+        # Built-in providers like AllowlistProvider don't need it, so only inject
+        # when the constructor accepts 'framework' or '**kwargs'.
+        if "framework" not in provider_kwargs:
+            try:
+                sig = inspect.signature(provider_cls.__init__)
+                if "framework" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    provider_kwargs["framework"] = "deerflow"
+            except (ValueError, TypeError):
+                pass
+        provider = provider_cls(**provider_kwargs)
+        middlewares.append(GuardrailMiddleware(provider, fail_closed=guardrails_config.fail_closed, passport=guardrails_config.passport))
+
+    from deerflow.agents.middlewares.sandbox_audit_middleware import SandboxAuditMiddleware
+
+    middlewares.append(SandboxAuditMiddleware())
     middlewares.append(ToolErrorHandlingMiddleware())
     return middlewares
 
 
-def build_lead_runtime_middlewares(*, lazy_init: bool = True) -> list[AgentMiddleware]:
+def build_lead_runtime_middlewares(*, app_config: AppConfig, lazy_init: bool = True) -> list[AgentMiddleware]:
     """Middlewares shared by lead agent runtime before lead-only middlewares."""
     return _build_runtime_middlewares(
+        app_config=app_config,
         include_uploads=True,
         include_dangling_tool_call_patch=True,
         lazy_init=lazy_init,
     )
 
 
-def build_subagent_runtime_middlewares(*, lazy_init: bool = True) -> list[AgentMiddleware]:
+def build_subagent_runtime_middlewares(*, app_config: AppConfig, lazy_init: bool = True) -> list[AgentMiddleware]:
     """Middlewares shared by subagent runtime before subagent-only middlewares."""
     return _build_runtime_middlewares(
+        app_config=app_config,
         include_uploads=False,
-        include_dangling_tool_call_patch=False,
+        include_dangling_tool_call_patch=True,
         lazy_init=lazy_init,
     )

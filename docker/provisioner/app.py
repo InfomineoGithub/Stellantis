@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 
@@ -39,7 +40,7 @@ from fastapi import FastAPI, HTTPException
 from kubernetes import client as k8s_client
 from kubernetes import config as k8s_config
 from kubernetes.client.rest import ApiException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Suppress only the InsecureRequestWarning from urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -59,9 +60,9 @@ SANDBOX_IMAGE = os.environ.get(
 )
 SKILLS_HOST_PATH = os.environ.get("SKILLS_HOST_PATH", "/skills")
 THREADS_HOST_PATH = os.environ.get("THREADS_HOST_PATH", "/.deer-flow/threads")
-# When set, sandbox user-data is mounted from this PVC instead of a hostPath.
-# Required for in-cluster deployments (e.g. GKE Autopilot) where hostPath is unavailable.
-SANDBOX_PVC_NAME = os.environ.get("SANDBOX_PVC_NAME", "")
+SKILLS_PVC_NAME = os.environ.get("SKILLS_PVC_NAME", "")
+USERDATA_PVC_NAME = os.environ.get("USERDATA_PVC_NAME", "")
+SAFE_THREAD_ID_PATTERN = r"^[A-Za-z0-9_\-]+$"
 
 # Path to the kubeconfig *inside* the provisioner container.
 # Typically the host's ~/.kube/config is mounted here.
@@ -71,6 +72,36 @@ KUBECONFIG_PATH = os.environ.get("KUBECONFIG_PATH", "/root/.kube/config")
 # services on the host Kubernetes node.  On Docker Desktop for macOS this
 # is ``host.docker.internal``; on Linux it may be the host's LAN IP.
 NODE_HOST = os.environ.get("NODE_HOST", "host.docker.internal")
+
+
+def join_host_path(base: str, *parts: str) -> str:
+    """Join host filesystem path segments while preserving native style."""
+    if not parts:
+        return base
+
+    if re.match(r"^[A-Za-z]:[\\/]", base) or base.startswith("\\\\") or "\\" in base:
+        from pathlib import PureWindowsPath
+
+        result = PureWindowsPath(base)
+        for part in parts:
+            result /= part
+        return str(result)
+
+    from pathlib import Path
+
+    result = Path(base)
+    for part in parts:
+        result /= part
+    return str(result)
+
+
+def _validate_thread_id(thread_id: str) -> str:
+    if not re.match(SAFE_THREAD_ID_PATTERN, thread_id):
+        raise ValueError(
+            "Invalid thread_id: only alphanumeric characters, hyphens, and underscores are allowed."
+        )
+    return thread_id
+
 
 # ── K8s client setup ────────────────────────────────────────────────────
 
@@ -124,9 +155,6 @@ def _init_k8s_client() -> k8s_client.CoreV1Api:
 
 def _wait_for_kubeconfig(timeout: int = 30) -> None:
     """Wait for kubeconfig file if configured, then continue with fallback support."""
-    if not KUBECONFIG_PATH:
-        logger.info("KUBECONFIG_PATH is empty; using in-cluster config")
-        return
     deadline = time.time() + timeout
     while time.time() < deadline:
         if os.path.exists(KUBECONFIG_PATH):
@@ -192,7 +220,7 @@ app = FastAPI(title="DeerFlow Sandbox Provisioner", lifespan=lifespan)
 
 class CreateSandboxRequest(BaseModel):
     sandbox_id: str
-    thread_id: str
+    thread_id: str = Field(pattern=SAFE_THREAD_ID_PATTERN)
 
 
 class SandboxResponse(BaseModel):
@@ -212,15 +240,72 @@ def _svc_name(sandbox_id: str) -> str:
     return f"sandbox-{sandbox_id}-svc"
 
 
-def _sandbox_url(sandbox_id: str, node_port: int) -> str:
-    """Build the sandbox URL. Uses in-cluster DNS when SANDBOX_USE_CLUSTER_DNS=true."""
-    if os.environ.get("SANDBOX_USE_CLUSTER_DNS", "false").lower() == "true":
-        return f"http://{_svc_name(sandbox_id)}.{K8S_NAMESPACE}.svc.cluster.local:8080"
+def _sandbox_url(node_port: int) -> str:
+    """Build the sandbox URL using the configured NODE_HOST."""
     return f"http://{NODE_HOST}:{node_port}"
+
+
+def _build_volumes(thread_id: str) -> list[k8s_client.V1Volume]:
+    """Build volume list: PVC when configured, otherwise hostPath."""
+    if SKILLS_PVC_NAME:
+        skills_vol = k8s_client.V1Volume(
+            name="skills",
+            persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
+                claim_name=SKILLS_PVC_NAME,
+                read_only=True,
+            ),
+        )
+    else:
+        skills_vol = k8s_client.V1Volume(
+            name="skills",
+            host_path=k8s_client.V1HostPathVolumeSource(
+                path=SKILLS_HOST_PATH,
+                type="Directory",
+            ),
+        )
+
+    if USERDATA_PVC_NAME:
+        userdata_vol = k8s_client.V1Volume(
+            name="user-data",
+            persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
+                claim_name=USERDATA_PVC_NAME,
+            ),
+        )
+    else:
+        userdata_vol = k8s_client.V1Volume(
+            name="user-data",
+            host_path=k8s_client.V1HostPathVolumeSource(
+                path=join_host_path(THREADS_HOST_PATH, thread_id, "user-data"),
+                type="DirectoryOrCreate",
+            ),
+        )
+
+    return [skills_vol, userdata_vol]
+
+
+def _build_volume_mounts(thread_id: str) -> list[k8s_client.V1VolumeMount]:
+    """Build volume mount list, using subPath for PVC user-data."""
+    userdata_mount = k8s_client.V1VolumeMount(
+        name="user-data",
+        mount_path="/mnt/user-data",
+        read_only=False,
+    )
+    if USERDATA_PVC_NAME:
+        userdata_mount.sub_path = f"threads/{thread_id}/user-data"
+
+    return [
+        k8s_client.V1VolumeMount(
+            name="skills",
+            mount_path="/mnt/skills",
+            read_only=True,
+        ),
+        userdata_mount,
+    ]
 
 
 def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
     """Construct a Pod manifest for a single sandbox."""
+    thread_id = _validate_thread_id(thread_id)
     return k8s_client.V1Pod(
         metadata=k8s_client.V1ObjectMeta(
             name=_pod_name(sandbox_id),
@@ -253,14 +338,14 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
                         initial_delay_seconds=5,
                         period_seconds=5,
                         timeout_seconds=3,
-                        failure_threshold=12,
+                        failure_threshold=3,
                     ),
                     liveness_probe=k8s_client.V1Probe(
                         http_get=k8s_client.V1HTTPGetAction(
                             path="/v1/sandbox",
                             port=8080,
                         ),
-                        initial_delay_seconds=60,
+                        initial_delay_seconds=10,
                         period_seconds=10,
                         timeout_seconds=3,
                         failure_threshold=3,
@@ -277,55 +362,14 @@ def _build_pod(sandbox_id: str, thread_id: str) -> k8s_client.V1Pod:
                             "ephemeral-storage": "500Mi",
                         },
                     ),
-                    volume_mounts=[
-                        k8s_client.V1VolumeMount(
-                            name="shared-data" if SANDBOX_PVC_NAME else "skills",
-                            mount_path="/mnt/skills",
-                            read_only=True,
-                            sub_path="skills"
-                            if SANDBOX_PVC_NAME
-                            else None,
-                        ),
-                        k8s_client.V1VolumeMount(
-                            name="shared-data" if SANDBOX_PVC_NAME else "user-data",
-                            mount_path="/mnt/user-data",
-                            read_only=False,
-                            sub_path=f"threads/{thread_id}/user-data"
-                            if SANDBOX_PVC_NAME
-                            else None,
-                        ),
-                    ],
+                    volume_mounts=_build_volume_mounts(thread_id),
                     security_context=k8s_client.V1SecurityContext(
                         privileged=False,
-                        allow_privilege_escalation=False,
+                        allow_privilege_escalation=True,
                     ),
                 )
             ],
-            volumes=[
-                k8s_client.V1Volume(
-                    name="shared-data",
-                    persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
-                        claim_name=SANDBOX_PVC_NAME,
-                    ),
-                ),
-            ]
-            if SANDBOX_PVC_NAME
-            else [
-                k8s_client.V1Volume(
-                    name="skills",
-                    host_path=k8s_client.V1HostPathVolumeSource(
-                        path=SKILLS_HOST_PATH,
-                        type="Directory",
-                    ),
-                ),
-                k8s_client.V1Volume(
-                    name="user-data",
-                    host_path=k8s_client.V1HostPathVolumeSource(
-                        path=f"{THREADS_HOST_PATH}/{thread_id}/user-data",
-                        type="DirectoryOrCreate",
-                    ),
-                ),
-            ],
+            volumes=_build_volumes(thread_id),
             restart_policy="Always",
         ),
     )
@@ -411,7 +455,7 @@ async def create_sandbox(req: CreateSandboxRequest):
     if existing_port:
         return SandboxResponse(
             sandbox_id=sandbox_id,
-            sandbox_url=_sandbox_url(sandbox_id, existing_port),
+            sandbox_url=_sandbox_url(existing_port),
             status=_get_pod_phase(sandbox_id),
         )
 
@@ -455,7 +499,7 @@ async def create_sandbox(req: CreateSandboxRequest):
 
     return SandboxResponse(
         sandbox_id=sandbox_id,
-        sandbox_url=_sandbox_url(sandbox_id, node_port),
+        sandbox_url=_sandbox_url(node_port),
         status=_get_pod_phase(sandbox_id),
     )
 
@@ -498,7 +542,7 @@ async def get_sandbox(sandbox_id: str):
 
     return SandboxResponse(
         sandbox_id=sandbox_id,
-        sandbox_url=_sandbox_url(sandbox_id, node_port),
+        sandbox_url=_sandbox_url(node_port),
         status=_get_pod_phase(sandbox_id),
     )
 
@@ -530,7 +574,7 @@ async def list_sandboxes():
             sandboxes.append(
                 SandboxResponse(
                     sandbox_id=sid,
-                    sandbox_url=_sandbox_url(sid, node_port),
+                    sandbox_url=_sandbox_url(node_port),
                     status=_get_pod_phase(sid),
                 )
             )

@@ -32,6 +32,10 @@ export interface Translations {
     save: string;
     install: string;
     create: string;
+    export: string;
+    exportSuccess: string;
+    exportAsMarkdown: string;
+    exportAsJSON: string;
   };
 
   // Welcome
@@ -292,5 +296,27 @@ export interface Translations {
       emptyTitle: string;
       emptyDescription: string;
     };
+  };
+
+  // Shortcuts
+  shortcuts: {
+    searchActions: string;
+    noResults: string;
+    actions: string;
+    keyboardShortcuts: string;
+    keyboardShortcutsDescription: string;
+    openCommandPalette: string;
+    toggleSidebar: string;
+  };
+
+  // Token Usage
+  tokenUsage: {
+    label: string;
+    title: string;
+    input: string;
+    output: string;
+    total: string;
+    unavailable: string;
+    unavailableShort: string;
   };
 }

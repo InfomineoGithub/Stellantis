@@ -1,7 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
-
 
 @source "../node_modules/streamdown/dist/index.js";
 
@@ -142,7 +141,6 @@
   --animate-wave: wave 0.6s ease-in-out 2;
 
   @keyframes wave {
-
     0%,
     100% {
       transform: rotate(0deg);
@@ -255,14 +253,14 @@
   --card-foreground: oklch(0.15 0.025 264);
   --popover: oklch(1 0.005 264);
   --popover-foreground: oklch(0.15 0.025 264);
-  --primary: oklch(0.50 0.22 264);
+  --primary: oklch(0.5 0.22 264);
   --primary-foreground: oklch(0.98 0 0);
   --secondary: oklch(0.48 0.22 264);
   --secondary-foreground: oklch(0.98 0 0);
   --muted: oklch(0.93 0.015 264);
-  --muted-foreground: oklch(0.50 0.06 264);
+  --muted-foreground: oklch(0.5 0.06 264);
   --accent: oklch(0.91 0.04 264);
-  --accent-foreground: oklch(0.30 0.15 264);
+  --accent-foreground: oklch(0.3 0.15 264);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.87 0.03 264);
   --input: oklch(0.92 0.02 264);
@@ -274,39 +272,39 @@
   --chart-5: oklch(0.769 0.188 70.08);
   --sidebar: oklch(0.95 0.015 264);
   --sidebar-foreground: oklch(0.15 0.025 264);
-  --sidebar-primary: oklch(0.50 0.22 264);
+  --sidebar-primary: oklch(0.5 0.22 264);
   --sidebar-primary-foreground: oklch(0.98 0 0);
   --sidebar-accent: oklch(0.88 0.05 264);
-  --sidebar-accent-foreground: oklch(0.25 0.10 264);
+  --sidebar-accent-foreground: oklch(0.25 0.1 264);
   --sidebar-border: oklch(0.87 0.03 264);
-  --sidebar-ring: oklch(0.60 0.10 264);
+  --sidebar-ring: oklch(0.6 0.1 264);
 }
 
 .dark {
   --background: oklch(0.18 0.02 264);
   --foreground: oklch(0.95 0 0);
-  --card: oklch(0.20 0.02 264);
+  --card: oklch(0.2 0.02 264);
   --card-foreground: oklch(0.95 0 0);
   --popover: oklch(0.16 0.02 264);
   --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.72 0.20 264);
-  --primary-foreground: oklch(0.10 0.02 264);
+  --primary: oklch(0.72 0.2 264);
+  --primary-foreground: oklch(0.1 0.02 264);
   --secondary: oklch(0.38 0.18 264);
   --secondary-foreground: oklch(0.97 0 0);
   --muted: oklch(0.24 0.025 264);
-  --muted-foreground: oklch(0.70 0.06 264);
+  --muted-foreground: oklch(0.7 0.06 264);
   --accent: oklch(0.28 0.08 264);
   --accent-foreground: oklch(0.95 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(0.65 0.15 264 / 20%);
-  --input: oklch(0.65 0.10 264 / 18%);
+  --input: oklch(0.65 0.1 264 / 18%);
   --ring: transparent;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.20 0.025 264);
+  --sidebar: oklch(0.2 0.025 264);
   --sidebar-foreground: oklch(0.95 0 0);
   --sidebar-primary: oklch(0.65 0.22 264);
   --sidebar-primary-foreground: oklch(0.95 0 0);
@@ -359,17 +357,19 @@
     position: absolute;
     left: 0;
     top: 0;
-    background: linear-gradient(45deg,
-        #fb0094,
-        #0000ff,
-        #00ff00,
-        #ffff00,
-        #ff0000,
-        #fb0094,
-        #0000ff,
-        #00ff00,
-        #ffff00,
-        #ff0000);
+    background: linear-gradient(
+      45deg,
+      #fb0094,
+      #0000ff,
+      #00ff00,
+      #ffff00,
+      #ff0000,
+      #fb0094,
+      #0000ff,
+      #00ff00,
+      #ffff00,
+      #ff0000
+    );
     background-size: 400%;
     width: 100%;
     height: 100%;
@@ -477,11 +477,19 @@
   }
 
   .feature-box {
-    background: linear-gradient(to bottom right, rgba(23, 31, 51, 0.4), rgba(11, 19, 38, 0.2));
+    background: linear-gradient(
+      to bottom right,
+      rgba(23, 31, 51, 0.4),
+      rgba(11, 19, 38, 0.2)
+    );
     border: 1px solid rgba(173, 198, 255, 0.05);
   }
 
   .material-symbols-outlined {
-    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    font-variation-settings:
+      "FILL" 0,
+      "wght" 400,
+      "GRAD" 0,
+      "opsz" 24;
   }
 }

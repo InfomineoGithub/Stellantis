@@ -231,7 +231,7 @@ class TestResolveAttachments:
         mock_paths = MagicMock()
         mock_paths.sandbox_outputs_dir.return_value = outputs_dir
 
-        def resolve_side_effect(tid, vpath):
+        def resolve_side_effect(tid, vpath, *, user_id=None):
             if "data.csv" in vpath:
                 return good_file
             return tmp_path / "missing.txt"
@@ -276,6 +276,31 @@ class _DummyChannel(Channel):
 
 
 class TestBaseChannelOnOutbound:
+    def test_default_receive_file_returns_original_message(self):
+        """The base Channel.receive_file returns the original message unchanged."""
+
+        class MinimalChannel(Channel):
+            async def start(self):
+                pass
+
+            async def stop(self):
+                pass
+
+            async def send(self, msg):
+                pass
+
+        from app.channels.message_bus import InboundMessage
+
+        bus = MessageBus()
+        ch = MinimalChannel(name="minimal", bus=bus, config={})
+        msg = InboundMessage(channel_name="minimal", chat_id="c1", user_id="u1", text="hello", files=[{"file_key": "k1"}])
+
+        result = _run(ch.receive_file(msg, "thread-1"))
+
+        assert result is msg
+        assert result.text == "hello"
+        assert result.files == [{"file_key": "k1"}]
+
     def test_send_file_called_for_each_attachment(self, tmp_path):
         """_on_outbound sends text first, then uploads each attachment."""
         bus = MessageBus()

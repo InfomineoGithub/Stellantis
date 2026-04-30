@@ -70,6 +70,20 @@ cleanup() {
 # Set up trap for Ctrl+C
 trap cleanup INT TERM
 
+docker_available() {
+    # Check that the docker CLI exists
+    if ! command -v docker >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Check that the Docker daemon is reachable
+    if ! docker info >/dev/null 2>&1; then
+        return 1
+    fi
+
+    return 0
+}
+
 # Initialize: pre-pull the sandbox image so first Pod startup is fast
 init() {
     echo "=========================================="
@@ -79,9 +93,50 @@ init() {
 
     SANDBOX_IMAGE="enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest"
 
+    # Detect sandbox mode from config.yaml
+    local sandbox_mode
+    sandbox_mode="$(detect_sandbox_mode)"
+
+    # Skip image pull for local sandbox mode (no container image needed)
+    if [ "$sandbox_mode" = "local" ]; then
+        echo -e "${GREEN}Detected local sandbox mode — no Docker image required.${NC}"
+        echo ""
+
+        if docker_available; then
+            echo -e "${GREEN}✓ Docker environment is ready.${NC}"
+            echo ""
+            echo -e "${YELLOW}Next step: make docker-start${NC}"
+        else
+            echo -e "${YELLOW}Docker does not appear to be installed, or the Docker daemon is not reachable.${NC}"
+            echo "Local sandbox mode itself does not require Docker, but Docker-based workflows (e.g., docker-start) will fail until Docker is available."
+            echo ""
+            echo -e "${YELLOW}Install and start Docker, then run: make docker-init && make docker-start${NC}"
+        fi
+
+        return 0
+    fi
+
     if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${SANDBOX_IMAGE}$"; then
         echo -e "${BLUE}Pulling sandbox image: $SANDBOX_IMAGE ...${NC}"
-        docker pull "$SANDBOX_IMAGE"
+        echo ""
+
+        if ! docker pull "$SANDBOX_IMAGE" 2>&1; then
+            echo ""
+            echo -e "${YELLOW}⚠ Failed to pull sandbox image.${NC}"
+            echo ""
+            echo "This is expected if:"
+            echo "  1. You are using local sandbox mode (default — no image needed)"
+            echo "  2. You are behind a corporate proxy or firewall"
+            echo "  3. The registry requires authentication"
+            echo ""
+            echo -e "${GREEN}The Docker development environment can still be started.${NC}"
+            echo "If you need AIO sandbox (container-based execution):"
+            echo "  - Ensure you have network access to the registry"
+            echo "  - Or configure a custom sandbox image in config.yaml"
+            echo ""
+            echo -e "${YELLOW}Next step: make docker-start${NC}"
+            return 0
+        fi
     else
         echo -e "${GREEN}Sandbox image already exists locally: $SANDBOX_IMAGE${NC}"
     fi
@@ -97,6 +152,12 @@ start() {
     local sandbox_mode
     local services
 
+    if [ "$#" -gt 0 ]; then
+        echo -e "${YELLOW}Unknown option for start: $1${NC}"
+        echo "Usage: $0 start"
+        exit 1
+    fi
+
     echo "=========================================="
     echo "  Starting DeerFlow Docker Development"
     echo "=========================================="
@@ -104,12 +165,12 @@ start() {
 
     sandbox_mode="$(detect_sandbox_mode)"
 
+    services="frontend gateway nginx"
     if [ "$sandbox_mode" = "provisioner" ]; then
-        services="frontend gateway langgraph provisioner nginx"
-    else
-        services="frontend gateway langgraph nginx"
+        services="frontend gateway provisioner nginx"
     fi
 
+    echo -e "${BLUE}Runtime: Gateway embedded agent runtime${NC}"
     echo -e "${BLUE}Detected sandbox mode: $sandbox_mode${NC}"
     if [ "$sandbox_mode" = "provisioner" ]; then
         echo -e "${BLUE}Provisioner enabled (Kubernetes mode).${NC}"
@@ -136,6 +197,7 @@ start() {
             echo -e "${YELLOW}  configuration before starting DeerFlow.                  ${NC}"
             echo -e "${YELLOW}============================================================${NC}"
             echo ""
+            echo -e "${YELLOW}  Recommended: run 'make setup' before starting Docker.    ${NC}"
             echo -e "${YELLOW}  Edit the file:  $PROJECT_ROOT/config.yaml${NC}"
             echo -e "${YELLOW}  Then run:        make docker-start${NC}"
             echo ""
@@ -167,7 +229,8 @@ start() {
     echo ""
     echo "  🌐 Application: http://localhost:2026"
     echo "  📡 API Gateway: http://localhost:2026/api/*"
-    echo "  🤖 LangGraph:   http://localhost:2026/api/langgraph/*"
+    echo "  🤖 Runtime:     Gateway embedded"
+    echo "  API:            /api/langgraph/* → Gateway"
     echo ""
     echo "  📋 View logs: make docker-logs"
     echo "  🛑 Stop:      make docker-stop"
@@ -245,9 +308,9 @@ help() {
     echo "Usage: $0 <command> [options]"
     echo ""
     echo "Commands:"
-    echo "  init          - Pull the sandbox image (speeds up first Pod startup)"
-    echo "  start         - Start Docker services (auto-detects sandbox mode from config.yaml)"
-    echo "  restart       - Restart all running Docker services"
+    echo "  init              - Pull the sandbox image (speeds up first Pod startup)"
+    echo "  start             - Start Docker services (auto-detects sandbox mode from config.yaml)"
+    echo "  restart           - Restart all running Docker services"
     echo "  logs [option] - View Docker development logs"
     echo "                  --frontend   View frontend logs only"
     echo "                  --gateway    View gateway logs only"
@@ -265,7 +328,8 @@ main() {
             init
             ;;
         start)
-            start
+            shift
+            start "$@"
             ;;
         restart)
             restart

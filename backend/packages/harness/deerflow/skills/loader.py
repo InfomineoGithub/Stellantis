@@ -1,8 +1,13 @@
+import logging
 import os
 from pathlib import Path
 
+from deerflow.config.app_config import AppConfig
+
 from .parser import parse_skill_file
 from .types import Skill
+
+logger = logging.getLogger(__name__)
 
 
 def get_skills_root_path() -> Path:
@@ -19,7 +24,7 @@ def get_skills_root_path() -> Path:
     return skills_dir
 
 
-def load_skills(skills_path: Path | None = None, use_config: bool = True, enabled_only: bool = False) -> list[Skill]:
+def load_skills(skills_path: Path | None = None, use_config: bool = True, enabled_only: bool = False, *, app_config: AppConfig | None = None) -> list[Skill]:
     """
     Load all skills from the skills directory.
 
@@ -41,7 +46,7 @@ def load_skills(skills_path: Path | None = None, use_config: bool = True, enable
             try:
                 from deerflow.config import get_app_config
 
-                config = get_app_config()
+                config = app_config or get_app_config()
                 skills_path = config.skills.get_skills_path()
             except Exception:
                 # Fallback to default if config fails
@@ -52,7 +57,7 @@ def load_skills(skills_path: Path | None = None, use_config: bool = True, enable
     if not skills_path.exists():
         return []
 
-    skills = []
+    skills_by_name: dict[str, Skill] = {}
 
     # Scan public and custom directories
     for category in ["public", "custom"]:
@@ -60,7 +65,7 @@ def load_skills(skills_path: Path | None = None, use_config: bool = True, enable
         if not category_path.exists() or not category_path.is_dir():
             continue
 
-        for current_root, dir_names, file_names in os.walk(category_path):
+        for current_root, dir_names, file_names in os.walk(category_path, followlinks=True):
             # Keep traversal deterministic and skip hidden directories.
             dir_names[:] = sorted(name for name in dir_names if not name.startswith("."))
             if "SKILL.md" not in file_names:
@@ -71,7 +76,9 @@ def load_skills(skills_path: Path | None = None, use_config: bool = True, enable
 
             skill = parse_skill_file(skill_file, category=category, relative_path=relative_path)
             if skill:
-                skills.append(skill)
+                skills_by_name[skill.name] = skill
+
+    skills = list(skills_by_name.values())
 
     # Load skills state configuration and update enabled status
     # NOTE: We use ExtensionsConfig.from_file() instead of get_extensions_config()
@@ -86,7 +93,7 @@ def load_skills(skills_path: Path | None = None, use_config: bool = True, enable
             skill.enabled = extensions_config.is_skill_enabled(skill.name, skill.category)
     except Exception as e:
         # If config loading fails, default to all enabled
-        print(f"Warning: Failed to load extensions config: {e}")
+        logger.warning("Failed to load extensions config: %s", e)
 
     # Filter by enabled status if requested
     if enabled_only:

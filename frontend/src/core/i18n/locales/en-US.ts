@@ -43,6 +43,10 @@ export const enUS: Translations = {
     save: "Save",
     install: "Install",
     create: "Create",
+    export: "Export",
+    exportSuccess: "Exported successfully",
+    exportAsMarkdown: "Export as Markdown",
+    exportAsJSON: "Export as JSON",
   },
 
   // Welcome
@@ -361,5 +365,27 @@ export const enUS: Translations = {
       emptyTitle: "Acknowledgements",
       emptyDescription: "Credits and acknowledgements will show here.",
     },
+  },
+
+  // Shortcuts
+  shortcuts: {
+    searchActions: "Search actions...",
+    noResults: "No results found.",
+    actions: "Actions",
+    keyboardShortcuts: "Keyboard Shortcuts",
+    keyboardShortcutsDescription: "Keyboard shortcuts for common actions.",
+    openCommandPalette: "Open command palette",
+    toggleSidebar: "Toggle sidebar",
+  },
+
+  // Token Usage
+  tokenUsage: {
+    label: "Tokens",
+    title: "Token Usage",
+    input: "Input",
+    output: "Output",
+    total: "Total",
+    unavailable: "Token usage unavailable",
+    unavailableShort: "N/A",
   },
 };
