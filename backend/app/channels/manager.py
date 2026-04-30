@@ -26,6 +26,13 @@ DEFAULT_RUN_CONTEXT: dict[str, Any] = {
 }
 STREAM_UPDATE_MIN_INTERVAL_SECONDS = 0.35
 
+CHANNEL_CAPABILITIES: dict[str, set[str]] = {
+    "feishu": {"text", "streaming", "attachments"},
+    "slack": {"text", "attachments"},
+    "telegram": {"text", "attachments"},
+    "discord": {"text", "attachments"},
+}
+
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
