@@ -10,6 +10,7 @@ Fine-grained permission checks remain in authz.py decorators.
 """
 
 from collections.abc import Callable
+from types import SimpleNamespace
 
 from fastapi import HTTPException, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -80,8 +81,51 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if is_valid_internal_auth_token(request.headers.get(INTERNAL_AUTH_HEADER_NAME)):
             internal_user = get_internal_user()
 
-        # Non-public path: require session cookie
-        if internal_user is None and not request.cookies.get("access_token"):
+        # ── 1. Internal auth (same-process channel calls) ────────────────
+        if internal_user is not None:
+            user = internal_user
+            request.state.user = user
+            request.state.auth = AuthContext(user=user, permissions=_ALL_PERMISSIONS)
+            token = set_current_user(user)
+            try:
+                return await call_next(request)
+            finally:
+                reset_current_user(token)
+
+        # ── 2. Bearer JWT (Better Auth tokens from the frontend) ─────────
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            bearer_token = auth_header[7:]
+            try:
+                from jwt_auth.verifier import verify_jwt
+
+                payload = verify_jwt(bearer_token)
+            except Exception:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "detail": AuthErrorResponse(
+                            code=AuthErrorCode.TOKEN_INVALID,
+                            message="Bearer token invalid or expired",
+                        ).model_dump()
+                    },
+                )
+            user = SimpleNamespace(
+                id=payload.get("sub") or payload.get("email") or "anonymous",
+                email=payload.get("email", ""),
+                system_role=payload.get("role", "user"),
+                needs_setup=False,
+            )
+            request.state.user = user
+            request.state.auth = AuthContext(user=user, permissions=_ALL_PERMISSIONS)
+            token = set_current_user(user)
+            try:
+                return await call_next(request)
+            finally:
+                reset_current_user(token)
+
+        # ── 3. Cookie-based session auth (custom local auth system) ───────
+        if not request.cookies.get("access_token"):
             return JSONResponse(
                 status_code=401,
                 content={
@@ -105,13 +149,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # bubble up, so we catch and render it as JSONResponse here.
         from app.gateway.deps import get_current_user_from_request
 
-        if internal_user is not None:
-            user = internal_user
-        else:
-            try:
-                user = await get_current_user_from_request(request)
-            except HTTPException as exc:
-                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        try:
+            user = await get_current_user_from_request(request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
         # Stamp both request.state.user (for the contextvar pattern)
         # and request.state.auth (so @require_permission's "auth is

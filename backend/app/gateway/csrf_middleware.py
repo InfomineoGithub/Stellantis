@@ -32,8 +32,16 @@ def should_check_csrf(request: Request) -> bool:
 
     CSRF is checked for state-changing methods (POST, PUT, DELETE, PATCH).
     GET, HEAD, OPTIONS, and TRACE are exempt per RFC 7231.
+
+    Requests authenticated via Bearer token are inherently CSRF-safe because
+    the browser cannot be tricked into sending an Authorization header
+    cross-origin (unlike cookies which are sent automatically).
     """
     if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
+        return False
+
+    # Bearer-token auth is CSRF-safe by design — skip the cookie check.
+    if request.headers.get("Authorization", "").startswith("Bearer "):
         return False
 
     path = request.url.path.rstrip("/")

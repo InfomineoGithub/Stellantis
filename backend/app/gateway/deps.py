@@ -184,43 +184,72 @@ def get_local_provider() -> LocalAuthProvider:
 
 
 async def get_current_user_from_request(request: Request):
-    """Get the current authenticated user from the request cookie.
+    """Get the current authenticated user from the request.
+
+    Resolution order:
+    1. ``access_token`` cookie — custom local auth system (HS256 cookie JWT).
+    2. ``Authorization: Bearer <token>`` — Better Auth JWT (HS256 or EdDSA via JWKS).
 
     Raises HTTPException 401 if not authenticated.
     """
+    from types import SimpleNamespace
+
     from app.gateway.auth import decode_token
     from app.gateway.auth.errors import AuthErrorCode, AuthErrorResponse, TokenError, token_error_to_code
 
+    # ── 1. Cookie-based session auth ──────────────────────────────────────
     access_token = request.cookies.get("access_token")
-    if not access_token:
-        raise HTTPException(
-            status_code=401,
-            detail=AuthErrorResponse(code=AuthErrorCode.NOT_AUTHENTICATED, message="Not authenticated").model_dump(),
+    if access_token:
+        payload = decode_token(access_token)
+        if isinstance(payload, TokenError):
+            raise HTTPException(
+                status_code=401,
+                detail=AuthErrorResponse(code=token_error_to_code(payload), message=f"Token error: {payload.value}").model_dump(),
+            )
+
+        provider = get_local_provider()
+        user = await provider.get_user(payload.sub)
+        if user is None:
+            raise HTTPException(
+                status_code=401,
+                detail=AuthErrorResponse(code=AuthErrorCode.USER_NOT_FOUND, message="User not found").model_dump(),
+            )
+
+        if user.token_version != payload.ver:
+            raise HTTPException(
+                status_code=401,
+                detail=AuthErrorResponse(code=AuthErrorCode.TOKEN_INVALID, message="Token revoked (password changed)").model_dump(),
+            )
+
+        return user
+
+    # ── 2. Bearer JWT (Better Auth tokens from the frontend) ─────────────
+    try:
+        auth_header = request.headers.get("Authorization", "") or ""
+    except Exception:
+        auth_header = ""
+    if isinstance(auth_header, str) and auth_header.startswith("Bearer "):
+        bearer_token = auth_header[7:]
+        try:
+            from jwt_auth.verifier import verify_jwt
+
+            jwt_payload = verify_jwt(bearer_token)
+        except Exception as e:
+            raise HTTPException(
+                status_code=401,
+                detail=AuthErrorResponse(code=AuthErrorCode.TOKEN_INVALID, message=f"Bearer token invalid: {e}").model_dump(),
+            )
+        return SimpleNamespace(
+            id=jwt_payload.get("sub") or jwt_payload.get("email") or "anonymous",
+            email=jwt_payload.get("email", ""),
+            system_role=jwt_payload.get("role", "user"),
+            needs_setup=False,
         )
 
-    payload = decode_token(access_token)
-    if isinstance(payload, TokenError):
-        raise HTTPException(
-            status_code=401,
-            detail=AuthErrorResponse(code=token_error_to_code(payload), message=f"Token error: {payload.value}").model_dump(),
-        )
-
-    provider = get_local_provider()
-    user = await provider.get_user(payload.sub)
-    if user is None:
-        raise HTTPException(
-            status_code=401,
-            detail=AuthErrorResponse(code=AuthErrorCode.USER_NOT_FOUND, message="User not found").model_dump(),
-        )
-
-    # Token version mismatch → password was changed, token is stale
-    if user.token_version != payload.ver:
-        raise HTTPException(
-            status_code=401,
-            detail=AuthErrorResponse(code=AuthErrorCode.TOKEN_INVALID, message="Token revoked (password changed)").model_dump(),
-        )
-
-    return user
+    raise HTTPException(
+        status_code=401,
+        detail=AuthErrorResponse(code=AuthErrorCode.NOT_AUTHENTICATED, message="Not authenticated").model_dump(),
+    )
 
 
 async def get_optional_user_from_request(request: Request):
