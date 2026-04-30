@@ -14,7 +14,8 @@ export const DEFAULT_LOCAL_SETTINGS: LocalSettings = {
   },
 };
 
-const LOCAL_SETTINGS_KEY = "deerflow.local-settings";
+export const LOCAL_SETTINGS_KEY = "deerflow.local-settings";
+export const THREAD_MODEL_KEY_PREFIX = "deerflow.thread-model.";
 
 export interface LocalSettings {
   notification: {
@@ -63,4 +64,21 @@ export function getLocalSettings(): LocalSettings {
 
 export function saveLocalSettings(settings: LocalSettings) {
   localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function getThreadModelName(threadId: string): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  return localStorage.getItem(THREAD_MODEL_KEY_PREFIX + threadId) ?? undefined;
+}
+
+export function saveThreadModelName(
+  threadId: string,
+  modelName: string | undefined,
+) {
+  if (typeof window === "undefined") return;
+  if (modelName) {
+    localStorage.setItem(THREAD_MODEL_KEY_PREFIX + threadId, modelName);
+  } else {
+    localStorage.removeItem(THREAD_MODEL_KEY_PREFIX + threadId);
+  }
 }

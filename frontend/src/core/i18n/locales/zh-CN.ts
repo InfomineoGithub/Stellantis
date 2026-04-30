@@ -43,6 +43,10 @@ export const zhCN: Translations = {
     save: "保存",
     install: "安装",
     create: "创建",
+    export: "导出",
+    exportSuccess: "导出成功",
+    exportAsMarkdown: "导出为 Markdown",
+    exportAsJSON: "导出为 JSON",
   },
 
   // Welcome
@@ -346,5 +350,27 @@ export const zhCN: Translations = {
       emptyTitle: "致谢",
       emptyDescription: "相关的致谢信息会展示在这里。",
     },
+  },
+
+  // Shortcuts
+  shortcuts: {
+    searchActions: "搜索操作...",
+    noResults: "没有找到结果。",
+    actions: "操作",
+    keyboardShortcuts: "键盘快捷键",
+    keyboardShortcutsDescription: "常用操作的键盘快捷键。",
+    openCommandPalette: "打开命令面板",
+    toggleSidebar: "切换侧边栏",
+  },
+
+  // Token Usage
+  tokenUsage: {
+    label: "Token",
+    title: "Token 使用情况",
+    input: "输入",
+    output: "输出",
+    total: "合计",
+    unavailable: "Token 使用情况不可用",
+    unavailableShort: "N/A",
   },
 };

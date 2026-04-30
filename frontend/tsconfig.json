@@ -49,6 +49,15 @@
   ],
   "exclude": [
     "node_modules",
-    "generated"
+    "generated",
+    "src/app/[lang]",
+    "src/app/blog",
+    "src/content",
+    "src/core/blog",
+    "src/mdx-components.ts",
+    "tests/e2e",
+    "tests/unit",
+    "playwright.config.ts",
+    "vitest.config.ts"
   ]
 }
