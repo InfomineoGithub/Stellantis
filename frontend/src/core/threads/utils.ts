@@ -2,7 +2,26 @@ import type { Message } from "@langchain/langgraph-sdk";
 
 import type { AgentThread } from "./types";
 
-export function pathOfThread(threadId: string) {
+type ThreadContext = { agent_name?: string };
+type ThreadLike =
+  | string
+  | { thread_id: string; context?: ThreadContext; metadata?: ThreadContext };
+
+export function pathOfThread(thread: ThreadLike, context?: ThreadContext) {
+  let threadId: string;
+  let agentName: string | undefined;
+
+  if (typeof thread === "string") {
+    threadId = thread;
+    agentName = context?.agent_name;
+  } else {
+    threadId = thread.thread_id;
+    agentName = thread.context?.agent_name ?? thread.metadata?.agent_name;
+  }
+
+  if (agentName) {
+    return `/workspace/agents/${encodeURIComponent(agentName)}/chats/${threadId}`;
+  }
   return `/workspace/chats/${threadId}`;
 }
 
