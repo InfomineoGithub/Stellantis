@@ -6,17 +6,17 @@ interface GenericMessageGroup<T = string> {
   messages: Message[];
 }
 
-interface HumanMessageGroup extends GenericMessageGroup<"human"> {}
+interface HumanMessageGroup extends GenericMessageGroup<"human"> { }
 
-interface AssistantProcessingGroup extends GenericMessageGroup<"assistant:processing"> {}
+interface AssistantProcessingGroup extends GenericMessageGroup<"assistant:processing"> { }
 
-interface AssistantMessageGroup extends GenericMessageGroup<"assistant"> {}
+interface AssistantMessageGroup extends GenericMessageGroup<"assistant"> { }
 
-interface AssistantPresentFilesGroup extends GenericMessageGroup<"assistant:present-files"> {}
+interface AssistantPresentFilesGroup extends GenericMessageGroup<"assistant:present-files"> { }
 
-interface AssistantClarificationGroup extends GenericMessageGroup<"assistant:clarification"> {}
+interface AssistantClarificationGroup extends GenericMessageGroup<"assistant:clarification"> { }
 
-interface AssistantSubagentGroup extends GenericMessageGroup<"assistant:subagent"> {}
+interface AssistantSubagentGroup extends GenericMessageGroup<"assistant:subagent"> { }
 
 type MessageGroup =
   | HumanMessageGroup
@@ -76,10 +76,13 @@ export function groupMessages<T>(
         if (open) {
           open.messages.push(message);
         } else {
-          console.error(
-            "Unexpected tool message outside a processing group",
-            message,
-          );
+          // Tool message arrived without an open processing group (e.g. out-of-order
+          // streaming). Open a new processing group so the message is not lost.
+          groups.push({
+            id: message.id,
+            type: "assistant:processing",
+            messages: [message],
+          });
         }
       }
       continue;
@@ -200,8 +203,8 @@ export function extractURLFromImageURLContent(
   content:
     | string
     | {
-        url: string;
-      },
+      url: string;
+    },
 ) {
   if (typeof content === "string") {
     return content;

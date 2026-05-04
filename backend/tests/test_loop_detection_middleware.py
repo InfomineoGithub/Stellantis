@@ -129,24 +129,24 @@ class TestLoopDetection:
         assert result is None
 
     def test_below_threshold_returns_none(self):
-        mw = LoopDetectionMiddleware(warn_threshold=3)
+        mw = LoopDetectionMiddleware(warn_threshold=5)
         runtime = _make_runtime()
         call = [_bash_call("ls")]
 
-        # First two identical calls — no warning
-        for _ in range(2):
+        # First four identical calls — no warning
+        for _ in range(4):
             result = mw._apply(_make_state(tool_calls=call), runtime)
             assert result is None
 
     def test_warn_at_threshold(self):
-        mw = LoopDetectionMiddleware(warn_threshold=3, hard_limit=5)
+        mw = LoopDetectionMiddleware(warn_threshold=5, hard_limit=10)
         runtime = _make_runtime()
         call = [_bash_call("ls")]
 
-        for _ in range(2):
+        for _ in range(4):
             mw._apply(_make_state(tool_calls=call), runtime)
 
-        # Third identical call triggers warning
+        # Fifth identical call triggers warning
         result = mw._apply(_make_state(tool_calls=call), runtime)
         assert result is not None
         msgs = result["messages"]
@@ -156,32 +156,32 @@ class TestLoopDetection:
 
     def test_warn_only_injected_once(self):
         """Warning for the same hash should only be injected once per thread."""
-        mw = LoopDetectionMiddleware(warn_threshold=3, hard_limit=10)
+        mw = LoopDetectionMiddleware(warn_threshold=5, hard_limit=20)
         runtime = _make_runtime()
         call = [_bash_call("ls")]
 
-        # First two — no warning
-        for _ in range(2):
+        # First four — no warning
+        for _ in range(4):
             mw._apply(_make_state(tool_calls=call), runtime)
 
-        # Third — warning injected
+        # Fifth — warning injected
         result = mw._apply(_make_state(tool_calls=call), runtime)
         assert result is not None
         assert "LOOP DETECTED" in result["messages"][0].content
 
-        # Fourth — warning already injected, should return None
+        # Sixth — warning already injected, should return None
         result = mw._apply(_make_state(tool_calls=call), runtime)
         assert result is None
 
     def test_hard_stop_at_limit(self):
-        mw = LoopDetectionMiddleware(warn_threshold=2, hard_limit=4)
+        mw = LoopDetectionMiddleware(warn_threshold=3, hard_limit=10)
         runtime = _make_runtime()
         call = [_bash_call("ls")]
 
-        for _ in range(3):
+        for _ in range(9):
             mw._apply(_make_state(tool_calls=call), runtime)
 
-        # Fourth call triggers hard stop
+        # Tenth call triggers hard stop
         result = mw._apply(_make_state(tool_calls=call), runtime)
         assert result is not None
         msgs = result["messages"]
@@ -201,16 +201,16 @@ class TestLoopDetection:
             assert result is None
 
     def test_window_sliding(self):
-        mw = LoopDetectionMiddleware(warn_threshold=3, window_size=5)
+        mw = LoopDetectionMiddleware(warn_threshold=5, window_size=6)
         runtime = _make_runtime()
         call = [_bash_call("ls")]
 
-        # Fill with 2 identical calls
-        mw._apply(_make_state(tool_calls=call), runtime)
-        mw._apply(_make_state(tool_calls=call), runtime)
+        # Fill with 4 identical calls
+        for _ in range(4):
+            mw._apply(_make_state(tool_calls=call), runtime)
 
         # Push them out of the window with different calls
-        for i in range(5):
+        for i in range(6):
             mw._apply(_make_state(tool_calls=[_bash_call(f"other_{i}")]), runtime)
 
         # Now the original call should be fresh again — no warning
@@ -218,14 +218,14 @@ class TestLoopDetection:
         assert result is None
 
     def test_reset_clears_state(self):
-        mw = LoopDetectionMiddleware(warn_threshold=2)
+        mw = LoopDetectionMiddleware(warn_threshold=5)
         runtime = _make_runtime()
         call = [_bash_call("ls")]
 
-        mw._apply(_make_state(tool_calls=call), runtime)
-        mw._apply(_make_state(tool_calls=call), runtime)
+        for _ in range(4):
+            mw._apply(_make_state(tool_calls=call), runtime)
 
-        # Would trigger warning, but reset first
+        # Would trigger warning on 5th, but reset first
         mw.reset()
         result = mw._apply(_make_state(tool_calls=call), runtime)
         assert result is None
@@ -245,22 +245,24 @@ class TestLoopDetection:
 
     def test_thread_id_from_runtime_context(self):
         """Thread ID should come from runtime.context, not state."""
-        mw = LoopDetectionMiddleware(warn_threshold=2)
+        mw = LoopDetectionMiddleware(warn_threshold=3)
         runtime_a = _make_runtime("thread-A")
         runtime_b = _make_runtime("thread-B")
         call = [_bash_call("ls")]
 
-        # One call on thread A
-        mw._apply(_make_state(tool_calls=call), runtime_a)
-        # One call on thread B
-        mw._apply(_make_state(tool_calls=call), runtime_b)
+        # Two calls on thread A
+        for _ in range(2):
+            mw._apply(_make_state(tool_calls=call), runtime_a)
+        # Two calls on thread B
+        for _ in range(2):
+            mw._apply(_make_state(tool_calls=call), runtime_b)
 
-        # Second call on thread A — triggers warning (2 >= warn_threshold)
+        # Third call on thread A — triggers warning (3 >= warn_threshold)
         result = mw._apply(_make_state(tool_calls=call), runtime_a)
         assert result is not None
         assert "LOOP DETECTED" in result["messages"][0].content
 
-        # Second call on thread B — also triggers (independent tracking)
+        # Third call on thread B — also triggers (independent tracking)
         result = mw._apply(_make_state(tool_calls=call), runtime_b)
         assert result is not None
         assert "LOOP DETECTED" in result["messages"][0].content
@@ -294,7 +296,7 @@ class TestLoopDetection:
 
     def test_fallback_thread_id_when_missing(self):
         """When runtime context has no thread_id, should use 'default'."""
-        mw = LoopDetectionMiddleware(warn_threshold=2)
+        mw = LoopDetectionMiddleware(warn_threshold=5)
         runtime = MagicMock()
         runtime.context = {}
         call = [_bash_call("ls")]
@@ -465,22 +467,22 @@ class TestToolFrequencyDetection:
         return {"name": "read_file", "id": f"call_read_{path}", "args": {"path": path}}
 
     def test_below_freq_warn_returns_none(self):
-        mw = LoopDetectionMiddleware(tool_freq_warn=5, tool_freq_hard_limit=10)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime = _make_runtime()
 
-        for i in range(4):
+        for i in range(69):
             result = mw._apply(_make_state(tool_calls=[self._read_call(f"/file_{i}.py")]), runtime)
             assert result is None
 
     def test_freq_warn_at_threshold(self):
-        mw = LoopDetectionMiddleware(tool_freq_warn=5, tool_freq_hard_limit=10)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime = _make_runtime()
 
-        for i in range(4):
+        for i in range(69):
             mw._apply(_make_state(tool_calls=[self._read_call(f"/file_{i}.py")]), runtime)
 
-        # 5th call to read_file (different file each time) triggers freq warning
-        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_4.py")]), runtime)
+        # 70th call to read_file (different file each time) triggers freq warning
+        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_69.py")]), runtime)
         assert result is not None
         msg = result["messages"][0]
         assert isinstance(msg, HumanMessage)
@@ -488,30 +490,30 @@ class TestToolFrequencyDetection:
         assert "LOOP DETECTED" in msg.content
 
     def test_freq_warn_only_injected_once(self):
-        mw = LoopDetectionMiddleware(tool_freq_warn=3, tool_freq_hard_limit=10)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime = _make_runtime()
 
-        for i in range(2):
+        for i in range(69):
             mw._apply(_make_state(tool_calls=[self._read_call(f"/file_{i}.py")]), runtime)
 
-        # 3rd triggers warning
-        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_2.py")]), runtime)
+        # 70th triggers warning
+        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_69.py")]), runtime)
         assert result is not None
         assert "LOOP DETECTED" in result["messages"][0].content
 
-        # 4th should not re-warn (already warned for read_file)
-        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_3.py")]), runtime)
+        # 71st should not re-warn (already warned for read_file)
+        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_70.py")]), runtime)
         assert result is None
 
     def test_freq_hard_stop_at_limit(self):
-        mw = LoopDetectionMiddleware(tool_freq_warn=3, tool_freq_hard_limit=6)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime = _make_runtime()
 
-        for i in range(5):
+        for i in range(99):
             mw._apply(_make_state(tool_calls=[self._read_call(f"/file_{i}.py")]), runtime)
 
-        # 6th call triggers hard stop
-        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_5.py")]), runtime)
+        # 100th call triggers hard stop
+        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_99.py")]), runtime)
         assert result is not None
         msg = result["messages"][0]
         assert isinstance(msg, AIMessage)
@@ -521,28 +523,28 @@ class TestToolFrequencyDetection:
 
     def test_different_tools_tracked_independently(self):
         """read_file and bash should have independent frequency counters."""
-        mw = LoopDetectionMiddleware(tool_freq_warn=3, tool_freq_hard_limit=10)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime = _make_runtime()
 
-        # 2 read_file calls
-        for i in range(2):
+        # 69 read_file calls
+        for i in range(69):
             mw._apply(_make_state(tool_calls=[self._read_call(f"/file_{i}.py")]), runtime)
 
-        # 2 bash calls — should not trigger (bash count = 2, read_file count = 2)
-        for i in range(2):
+        # 69 bash calls — should not trigger (bash count = 69, read_file count = 69)
+        for i in range(69):
             result = mw._apply(_make_state(tool_calls=[_bash_call(f"cmd_{i}")]), runtime)
             assert result is None
 
-        # 3rd read_file triggers (read_file count = 3)
-        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_2.py")]), runtime)
+        # 70th read_file triggers (read_file count = 70)
+        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_69.py")]), runtime)
         assert result is not None
         assert "read_file" in result["messages"][0].content
 
     def test_freq_reset_clears_state(self):
-        mw = LoopDetectionMiddleware(tool_freq_warn=3, tool_freq_hard_limit=10)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime = _make_runtime()
 
-        for i in range(2):
+        for i in range(69):
             mw._apply(_make_state(tool_calls=[self._read_call(f"/file_{i}.py")]), runtime)
 
         mw.reset()
@@ -553,12 +555,12 @@ class TestToolFrequencyDetection:
 
     def test_freq_reset_per_thread_clears_only_target(self):
         """reset(thread_id=...) should clear frequency state for that thread only."""
-        mw = LoopDetectionMiddleware(tool_freq_warn=3, tool_freq_hard_limit=10)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime_a = _make_runtime("thread-A")
         runtime_b = _make_runtime("thread-B")
 
-        # 2 calls on each thread
-        for i in range(2):
+        # 69 calls on each thread
+        for i in range(69):
             mw._apply(_make_state(tool_calls=[self._read_call(f"/a_{i}.py")]), runtime_a)
             mw._apply(_make_state(tool_calls=[self._read_call(f"/b_{i}.py")]), runtime_b)
 
@@ -568,8 +570,8 @@ class TestToolFrequencyDetection:
         assert "thread-A" not in mw._tool_freq
         assert "thread-A" not in mw._tool_freq_warned
 
-        # thread-B state should still be intact — 3rd call triggers warn
-        result = mw._apply(_make_state(tool_calls=[self._read_call("/b_2.py")]), runtime_b)
+        # thread-B state should still be intact — 70th call triggers warn
+        result = mw._apply(_make_state(tool_calls=[self._read_call("/b_69.py")]), runtime_b)
         assert result is not None
         assert "LOOP DETECTED" in result["messages"][0].content
 
@@ -579,58 +581,54 @@ class TestToolFrequencyDetection:
 
     def test_freq_per_thread_isolation(self):
         """Frequency counts should be independent per thread."""
-        mw = LoopDetectionMiddleware(tool_freq_warn=3, tool_freq_hard_limit=10)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime_a = _make_runtime("thread-A")
         runtime_b = _make_runtime("thread-B")
 
-        # 2 calls on thread A
-        for i in range(2):
+        # 69 calls on thread A
+        for i in range(69):
             mw._apply(_make_state(tool_calls=[self._read_call(f"/file_{i}.py")]), runtime_a)
 
-        # 2 calls on thread B — should NOT push thread A over threshold
-        for i in range(2):
+        # 69 calls on thread B — should NOT push thread A over threshold
+        for i in range(69):
             mw._apply(_make_state(tool_calls=[self._read_call(f"/other_{i}.py")]), runtime_b)
 
-        # 3rd call on thread A — triggers (count=3 for thread A only)
-        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_2.py")]), runtime_a)
+        # 70th call on thread A — triggers (count=70 for thread A only)
+        result = mw._apply(_make_state(tool_calls=[self._read_call("/file_69.py")]), runtime_a)
         assert result is not None
         assert "LOOP DETECTED" in result["messages"][0].content
 
     def test_multi_tool_single_response_counted(self):
         """When a single response has multiple tool calls, each is counted."""
-        mw = LoopDetectionMiddleware(tool_freq_warn=5, tool_freq_hard_limit=10)
+        mw = LoopDetectionMiddleware(tool_freq_warn=70, tool_freq_hard_limit=100)
         runtime = _make_runtime()
 
-        # Response 1: 2 read_file calls → count = 2
-        call = [self._read_call("/a.py"), self._read_call("/b.py")]
-        result = mw._apply(_make_state(tool_calls=call), runtime)
-        assert result is None
+        # 34 responses × 2 read_file calls = count 68
+        for i in range(34):
+            call = [self._read_call(f"/a_{i}.py"), self._read_call(f"/b_{i}.py")]
+            result = mw._apply(_make_state(tool_calls=call), runtime)
+            assert result is None
 
-        # Response 2: 2 more → count = 4
-        call = [self._read_call("/c.py"), self._read_call("/d.py")]
-        result = mw._apply(_make_state(tool_calls=call), runtime)
-        assert result is None
-
-        # Response 3: 1 more → count = 5 → triggers warn
-        result = mw._apply(_make_state(tool_calls=[self._read_call("/e.py")]), runtime)
+        # 1 more → count = 70 → triggers warn
+        result = mw._apply(_make_state(tool_calls=[self._read_call("/e.py"), self._read_call("/f.py")]), runtime)
         assert result is not None
         assert "read_file" in result["messages"][0].content
 
     def test_hash_detection_takes_priority(self):
         """Hash-based hard stop fires before frequency check for identical calls."""
         mw = LoopDetectionMiddleware(
-            warn_threshold=2,
-            hard_limit=3,
-            tool_freq_warn=100,
-            tool_freq_hard_limit=200,
+            warn_threshold=5,
+            hard_limit=10,
+            tool_freq_warn=1000,
+            tool_freq_hard_limit=2000,
         )
         runtime = _make_runtime()
         call = [self._read_call("/same_file.py")]
 
-        for _ in range(2):
+        for _ in range(9):
             mw._apply(_make_state(tool_calls=call), runtime)
 
-        # 3rd identical call → hash hard_limit=3 fires (not freq)
+        # 10th identical call → hash hard_limit=10 fires (not freq)
         result = mw._apply(_make_state(tool_calls=call), runtime)
         assert result is not None
         msg = result["messages"][0]

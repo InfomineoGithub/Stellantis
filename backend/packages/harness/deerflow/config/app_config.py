@@ -81,6 +81,7 @@ class AppConfig(BaseModel):
     """Config for the DeerFlow application"""
 
     log_level: str = Field(default="info", description="Logging level for deerflow and app modules (debug/info/warning/error); third-party libraries are not affected")
+    recursion_limit: int = Field(default=500, ge=1, description="LangGraph recursion limit for the lead agent graph (max graph nodes per run). Increase for long sequential task chains.")
     token_usage: TokenUsageConfig = Field(default_factory=TokenUsageConfig, description="Token usage tracking configuration")
     models: list[ModelConfig] = Field(default_factory=list, description="Available models")
     sandbox: SandboxConfig = Field(description="Sandbox configuration")

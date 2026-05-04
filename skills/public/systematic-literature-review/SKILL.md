@@ -100,7 +100,7 @@ Instead, you MUST call the `task` tool to spawn subagents. The reason: extractin
 
 Split papers into batches of ~5, then for each batch, call the `task` tool with `subagent_type: "general-purpose"`. Each subagent receives the paper abstracts as text and returns structured JSON.
 
-**Concurrency limit: at most 3 subagents per turn.** The DeerFlow runtime enforces `MAX_CONCURRENT_SUBAGENTS = 3` and will silently drop any extra dispatches in the same turn — the LLM will not be told this happened, so strictly follow the round strategy below.
+**Concurrency limit: at most 7 subagents per turn.** The DeerFlow runtime enforces `MAX_CONCURRENT_SUBAGENTS = 7` and will silently drop any extra dispatches in the same turn — the LLM will not be told this happened, so strictly follow the round strategy below.
 
 **Round strategy — use this decision table, do not compute the split yourself**:
 
@@ -109,15 +109,15 @@ Split papers into batches of ~5, then for each batch, call the `task` tool with 
 | 1–5 | 1 batch | 1 round | 1 subagent |
 | 6–10 | 2 batches | 1 round | 2 subagents |
 | 11–15 | 3 batches | 1 round | 3 subagents |
-| 16–20 | 4 batches | 2 rounds | 3 + 1 |
-| 21–25 | 5 batches | 2 rounds | 3 + 2 |
-| 26–30 | 6 batches | 2 rounds | 3 + 3 |
-| 31–35 | 7 batches | 3 rounds | 3 + 3 + 1 |
-| 36–40 | 8 batches | 3 rounds | 3 + 3 + 2 |
-| 41–45 | 9 batches | 3 rounds | 3 + 3 + 3 |
-| 46–50 | 10 batches | 4 rounds | 3 + 3 + 3 + 1 |
+| 16–20 | 4 batches | 1 round | 4 subagents |
+| 21–25 | 5 batches | 1 round | 5 subagents |
+| 26–30 | 6 batches | 1 round | 6 subagents |
+| 31–35 | 7 batches | 1 round | 7 subagents |
+| 36–40 | 8 batches | 2 rounds | 7 + 1 |
+| 41–45 | 9 batches | 2 rounds | 7 + 2 |
+| 46–50 | 10 batches | 2 rounds | 7 + 3 |
 
-**Never dispatch more than 3 subagents in the same turn.** When a row says "2 rounds (3 + 1)", that means: first turn dispatches 3 subagents in parallel, wait for all 3 to complete, then second turn dispatches 1 subagent. Rounds are strictly sequential at the main-agent level.
+**Never dispatch more than 7 subagents in the same turn.** When a row says "2 rounds (3 + 1)", that means: first turn dispatches 3 subagents in parallel, wait for all 3 to complete, then second turn dispatches 1 subagent. Rounds are strictly sequential at the main-agent level.
 
 If the paper count lands between rows (e.g. 23 papers), round up to the next row's layout but only dispatch as many batches as you actually need — the decision table gives you the shape, not a rigid prescription.
 

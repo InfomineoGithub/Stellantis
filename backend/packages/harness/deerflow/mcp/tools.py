@@ -54,6 +54,42 @@ def _make_sync_tool_wrapper(coro: Callable[..., Any], tool_name: str) -> Callabl
     return sync_wrapper
 
 
+def _filter_server_tools(tools: list[BaseTool], extensions_config: ExtensionsConfig) -> list[BaseTool]:
+    """Apply per-server include_tools / exclude_tools filters.
+
+    Tool names from MultiServerMCPClient are prefixed as ``{server_name}_{tool_name}``
+    (single underscore) when ``tool_name_prefix=True`` is used. The filter lists in
+    McpServerConfig use the *short* name (without the server prefix).
+    """
+    filtered: list[BaseTool] = []
+    for tool in tools:
+        server_name: str | None = None
+        short_name: str = tool.name
+        for name in extensions_config.mcp_servers:
+            prefix = f"{name}_"
+            if tool.name.startswith(prefix):
+                server_name = name
+                short_name = tool.name[len(prefix) :]
+                break
+
+        if server_name is None:
+            filtered.append(tool)
+            continue
+
+        server_config = extensions_config.mcp_servers[server_name]
+
+        if server_config.include_tools is not None and short_name not in server_config.include_tools:
+            logger.debug(f"Excluding tool '{tool.name}' (not in include_tools for server '{server_name}')")
+            continue
+
+        if server_config.exclude_tools is not None and short_name in server_config.exclude_tools:
+            logger.debug(f"Excluding tool '{tool.name}' (in exclude_tools for server '{server_name}')")
+            continue
+
+        filtered.append(tool)
+    return filtered
+
+
 async def get_mcp_tools() -> list[BaseTool]:
     """Get all tools from enabled MCP servers.
 
@@ -122,6 +158,10 @@ async def get_mcp_tools() -> list[BaseTool]:
         # Get all tools from all servers
         tools = await client.get_tools()
         logger.info(f"Successfully loaded {len(tools)} tool(s) from MCP servers")
+
+        # Apply per-server include/exclude filters
+        tools = _filter_server_tools(tools, extensions_config)
+        logger.info(f"{len(tools)} tool(s) remaining after per-server tool filters")
 
         # Patch tools to support sync invocation, as deerflow client streams synchronously
         for tool in tools:

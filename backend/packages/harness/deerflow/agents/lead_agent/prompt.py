@@ -702,7 +702,7 @@ def _build_custom_mounts_section(*, app_config: AppConfig | None = None) -> str:
 
 def apply_prompt_template(
     subagent_enabled: bool = False,
-    max_concurrent_subagents: int = 3,
+    max_concurrent_subagents: int = 7,
     *,
     agent_name: str | None = None,
     available_skills: set[str] | None = None,

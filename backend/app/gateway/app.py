@@ -4,7 +4,7 @@ import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.gateway.auth_middleware import AuthMiddleware
@@ -12,6 +12,7 @@ from app.gateway.config import get_gateway_config
 from app.gateway.csrf_middleware import CSRFMiddleware
 from app.gateway.deps import langgraph_runtime
 from app.gateway.routers import (
+    adapters,
     agents,
     artifacts,
     assistants_compat,
@@ -335,6 +336,7 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
 
     # MCP API is mounted at /api/mcp
     app.include_router(mcp.router)
+    app.include_router(adapters.router)
 
     # Memory API is mounted at /api/memory
     app.include_router(memory.router)
@@ -378,6 +380,13 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     # Business domain routers (vehicles + sources)
     app.include_router(vehicles_router.router)
     app.include_router(sources_router.router)
+
+    @app.get("/api/me", tags=["auth"], deprecated=True)
+    async def get_me_legacy(request: Request):
+        """Legacy alias for /api/v1/auth/me (deprecated)."""
+        from app.gateway.routers.auth import get_me
+
+        return await get_me(request)
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict:

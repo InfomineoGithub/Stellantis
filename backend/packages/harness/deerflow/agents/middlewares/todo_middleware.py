@@ -166,7 +166,7 @@ class TodoMiddleware(TodoListMiddleware):
                 "</system_reminder>"
             ),
         )
-        return {"jump_to": "model", "messages": [reminder]}
+        return None
 
     @override
     @hook_config(can_jump_to=["model"])

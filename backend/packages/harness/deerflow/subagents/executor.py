@@ -78,7 +78,31 @@ _background_tasks: dict[str, SubagentResult] = {}
 _background_tasks_lock = threading.Lock()
 
 # Thread pool for background task scheduling and orchestration
-_scheduler_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="subagent-scheduler-")
+_scheduler_pool = ThreadPoolExecutor(max_workers=20, thread_name_prefix="subagent-scheduler-")
+
+# Persistent IO executor for the isolated subagent loop.
+# This executor is set as the default executor on every new isolated loop via
+# loop.set_default_executor() so that LangSmith / LangChain callbacks that call
+# loop.run_in_executor(None, fn) use it.  Crucially, it is NOT shut down when
+# the isolated loop is closed (we detach it from the loop before loop.close() is
+# called), which prevents the race condition where an _aexecute coroutine still
+# running as a daemon thread calls run_in_executor() after the executor has been
+# shut down by loop.close().
+_subagent_io_executor: ThreadPoolExecutor | None = None
+_subagent_io_executor_lock = threading.Lock()
+
+
+def _get_or_create_subagent_io_executor() -> ThreadPoolExecutor:
+    """Return (or lazily create) the persistent IO executor for the isolated loop."""
+    global _subagent_io_executor
+    with _subagent_io_executor_lock:
+        if _subagent_io_executor is None or _subagent_io_executor._shutdown:  # noqa: SLF001
+            _subagent_io_executor = ThreadPoolExecutor(
+                max_workers=20,
+                thread_name_prefix="subagent-io-",
+            )
+        return _subagent_io_executor
+
 
 # Persistent event loop for isolated subagent executions triggered from an
 # already-running parent loop. Reusing one long-lived loop avoids creating a
@@ -127,6 +151,15 @@ def _shutdown_isolated_subagent_loop() -> None:
 
     if not loop.is_closed():
         if thread_stopped and loop_stopped:
+            # Detach the persistent IO executor before close() so that
+            # loop.close() does NOT call executor.shutdown() on it.  The
+            # executor may still be in use by daemon-thread _aexecute
+            # coroutines, and it will be cleaned up by Python's own
+            # _python_exit atexit handler when the process truly exits.
+            try:
+                loop._default_executor = None  # noqa: SLF001
+            except AttributeError:
+                pass
             loop.close()
         else:
             logger.warning(
@@ -148,6 +181,8 @@ def _get_isolated_subagent_loop() -> asyncio.AbstractEventLoop:
 
         if not loop_is_usable:
             loop = asyncio.new_event_loop()
+            # Attach the persistent IO executor so it survives loop.close().
+            loop.set_default_executor(_get_or_create_subagent_io_executor())
             started_event = threading.Event()
             thread = threading.Thread(
                 target=_run_isolated_subagent_loop,
@@ -531,6 +566,20 @@ class SubagentExecutor:
             result.status = SubagentStatus.COMPLETED
             result.completed_at = datetime.now()
 
+        except RuntimeError as e:
+            # Distinguish executor-shutdown errors (process/loop teardown) from real
+            # runtime errors so they are logged at a lower severity.  The persistent
+            # IO executor fix should prevent this path in normal operation, but the
+            # guard is kept here as a safety net for abrupt process termination.
+            err_str = str(e)
+            if "cannot schedule new futures after shutdown" in err_str or "Event loop is closed" in err_str:
+                logger.warning(f"[trace={self.trace_id}] Subagent {self.config.name} interrupted by executor/loop shutdown (process exiting?): {e}")
+            else:
+                logger.exception(f"[trace={self.trace_id}] Subagent {self.config.name} async execution failed")
+            result.status = SubagentStatus.FAILED
+            result.error = err_str
+            result.completed_at = datetime.now()
+
         except Exception as e:
             logger.exception(f"[trace={self.trace_id}] Subagent {self.config.name} async execution failed")
             result.status = SubagentStatus.FAILED
@@ -690,7 +739,7 @@ class SubagentExecutor:
         return task_id
 
 
-MAX_CONCURRENT_SUBAGENTS = 3
+MAX_CONCURRENT_SUBAGENTS = 15
 
 
 def request_cancel_background_task(task_id: str) -> None:

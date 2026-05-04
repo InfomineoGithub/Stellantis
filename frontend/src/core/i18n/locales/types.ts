@@ -92,13 +92,13 @@ export interface Translations {
     }[];
     suggestionsCreate: (
       | {
-          suggestion: string;
-          prompt: string;
-          icon: LucideIcon;
-        }
+        suggestion: string;
+        prompt: string;
+        icon: LucideIcon;
+      }
       | {
-          type: "separator";
-        }
+        type: "separator";
+      }
     )[];
   };
 
@@ -272,6 +272,10 @@ export interface Translations {
     tools: {
       title: string;
       description: string;
+      adapterHideRaw: string;
+      adapterEnable: string;
+      adapterDescriptionHideRaw: string;
+      adapterDescriptionShowRaw: string;
     };
     skills: {
       title: string;

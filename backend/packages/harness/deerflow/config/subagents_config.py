@@ -81,6 +81,12 @@ class SubagentsAppConfig(BaseModel):
         ge=1,
         description="Optional default max-turn override for all subagents (None = keep builtin defaults)",
     )
+    max_concurrent: int = Field(
+        default=7,
+        ge=2,
+        le=15,
+        description="Maximum parallel subagent task calls allowed per model response (default: 7, range: [2, 15])",
+    )
     agents: dict[str, SubagentOverrideConfig] = Field(
         default_factory=dict,
         description="Per-agent configuration overrides keyed by agent name",

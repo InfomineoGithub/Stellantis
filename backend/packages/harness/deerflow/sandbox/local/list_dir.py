@@ -60,7 +60,9 @@ def list_dir(path: str, max_depth: int = 2) -> list[str]:
                 # Recurse into subdirectories if not at max depth
                 if item.is_dir() and current_depth < max_depth:
                     _traverse(item, current_depth + 1)
-        except PermissionError:
+        except OSError:
+            # Silently skip directories that cannot be read (PermissionError,
+            # EDEADLK from Docker Desktop volume mounts, etc.)
             pass
 
     _traverse(root_path, 1)

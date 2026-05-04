@@ -19,6 +19,7 @@ from app.channels.message_bus import InboundMessage, InboundMessageType, Message
 from app.channels.store import ChannelStore
 from app.gateway.csrf_middleware import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, generate_csrf_token
 from app.gateway.internal_auth import create_internal_auth_headers
+from deerflow.config.app_config import get_app_config
 from deerflow.runtime.user_context import get_effective_user_id
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,6 @@ DEFAULT_GATEWAY_URL = "http://localhost:8001"
 DEFAULT_ASSISTANT_ID = "lead_agent"
 CUSTOM_AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
 
-DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 100}
 DEFAULT_RUN_CONTEXT: dict[str, Any] = {
     "thinking_enabled": True,
     "is_plan_mode": False,
@@ -574,7 +574,7 @@ class ChannelManager:
             assistant_id = self._assistant_id
 
         run_config = _merge_dicts(
-            DEFAULT_RUN_CONFIG,
+            {"recursion_limit": get_app_config().recursion_limit},
             self._default_session.get("config"),
             channel_layer.get("config"),
             user_layer.get("config"),

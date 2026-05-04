@@ -337,6 +337,10 @@ export const enUS: Translations = {
     tools: {
       title: "Tools",
       description: "Manage the configuration and enabled status of MCP tools.",
+      adapterHideRaw: "hide raw",
+      adapterEnable: "enable",
+      adapterDescriptionHideRaw: "Hides raw MCP tools from the model.",
+      adapterDescriptionShowRaw: "Raw MCP tools remain visible alongside this adapter.",
     },
     skills: {
       title: "Agent Skills",

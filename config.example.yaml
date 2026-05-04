@@ -597,6 +597,8 @@ sandbox:
 #   timeout_seconds: 900
 #   # Optional global max-turn override for all subagents
 #   # max_turns: 120
+#   # Maximum parallel subagent task calls per model response (default: 7, range: [2, 10])
+#   # max_concurrent: 7
 #
 #   # Optional per-agent overrides (applies to both built-in and custom agents)
 #   agents:

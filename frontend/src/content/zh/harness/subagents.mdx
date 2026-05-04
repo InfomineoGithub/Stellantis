@@ -88,7 +88,7 @@ subagents:
 `SubagentLimitMiddleware` 控制 Lead Agent 在单次轮次中可以并行调用多少个子 Agent，通过每次请求的配置控制：
 
 - `subagent_enabled`：是否为此会话激活子 Agent 委派
-- `max_concurrent_subagents`：单次轮次中最大并行任务调用数（默认：3）
+- `max_concurrent_subagents`：单次轮次中最大并行任务调用数（默认：7）
 
 如果 Agent 尝试调用超过限制的子 Agent，中间件会裁剪多余的调用。
 

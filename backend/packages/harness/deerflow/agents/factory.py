@@ -266,8 +266,9 @@ def _assemble_from_features(
             chain.append(feat.subagent)
         else:
             from deerflow.agents.middlewares.subagent_limit_middleware import SubagentLimitMiddleware
+            from deerflow.config.subagents_config import get_subagents_app_config
 
-            chain.append(SubagentLimitMiddleware())
+            chain.append(SubagentLimitMiddleware(max_concurrent=get_subagents_app_config().max_concurrent))
         from deerflow.tools.builtins import task_tool
 
         extra_tools.append(task_tool)

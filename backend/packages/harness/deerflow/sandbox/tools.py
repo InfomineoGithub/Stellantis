@@ -1277,10 +1277,10 @@ def ls_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, path:
         description: Explain why you are listing this directory in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
         path: The **absolute** path to the directory to list.
     """
+    requested_path = path
     try:
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
-        requested_path = path
         thread_data = None
         if is_local_sandbox(runtime):
             thread_data = get_thread_data(runtime)
@@ -1312,6 +1312,9 @@ def ls_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, path:
         return f"Error: Directory not found: {requested_path}"
     except PermissionError:
         return f"Error: Permission denied: {requested_path}"
+    except OSError as e:
+        # Covers EDEADLK (errno 36) from Docker Desktop volume mounts and similar
+        return f"Error: System error listing directory '{requested_path}': {e.strerror} (errno {e.errno})"
     except Exception as e:
         return f"Error: Unexpected error listing directory: {_sanitize_error(e, runtime)}"
 

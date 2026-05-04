@@ -43,6 +43,14 @@ class McpServerConfig(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict, description="HTTP headers to send (for sse or http type)")
     oauth: McpOAuthConfig | None = Field(default=None, description="OAuth configuration (for sse or http type)")
     description: str = Field(default="", description="Human-readable description of what this MCP server provides")
+    include_tools: list[str] | None = Field(
+        default=None,
+        description="Allowlist of tool names (without server prefix) to load from this server. If set, only these tools are loaded.",
+    )
+    exclude_tools: list[str] | None = Field(
+        default=None,
+        description="Denylist of tool names (without server prefix) to exclude from this server. Applied after include_tools.",
+    )
     model_config = ConfigDict(extra="allow")
 
 
@@ -50,6 +58,19 @@ class SkillStateConfig(BaseModel):
     """Configuration for a single skill's state."""
 
     enabled: bool = Field(default=True, description="Whether this skill is enabled")
+
+
+class AdapterConfig(BaseModel):
+    """Configuration for an adapter that wraps MCP server tools."""
+
+    enabled: bool = Field(default=False, description="Whether this adapter is enabled")
+    wraps_server: str | None = Field(default=None, description="Name of the MCP server whose tools this adapter wraps")
+    hide_wrapped_tools: bool = Field(default=False, description="If true, hide the wrapped MCP server's tools from the agent")
+    tool_mappings: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping of adapter logical tool names to underlying MCP tool names (without server prefix)",
+    )
+    model_config = ConfigDict(extra="allow")
 
 
 class ExtensionsConfig(BaseModel):
@@ -63,6 +84,10 @@ class ExtensionsConfig(BaseModel):
     skills: dict[str, SkillStateConfig] = Field(
         default_factory=dict,
         description="Map of skill name to state configuration",
+    )
+    adapters: dict[str, AdapterConfig] = Field(
+        default_factory=dict,
+        description="Map of adapter name to adapter configuration",
     )
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 

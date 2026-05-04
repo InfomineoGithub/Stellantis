@@ -6,6 +6,7 @@ from deerflow.config import get_app_config
 from deerflow.config.app_config import AppConfig
 from deerflow.reflection import resolve_variable
 from deerflow.sandbox.security import is_host_bash_allowed
+from deerflow.tools.adapters import load_adapter_tools
 from deerflow.tools.builtins import ask_clarification_tool, present_file_tool, task_tool, view_image_tool
 from deerflow.tools.builtins.tool_search import reset_deferred_registry
 
@@ -108,6 +109,7 @@ def get_available_tools(
     # made through the Gateway API (which runs in a separate process) are immediately
     # reflected when loading MCP tools.
     mcp_tools = []
+    adapter_tools: list[BaseTool] = []
     # Reset deferred registry upfront to prevent stale state from previous calls
     reset_deferred_registry()
     if include_mcp:
@@ -133,6 +135,12 @@ def get_available_tools(
                         set_deferred_registry(registry)
                         builtin_tools.append(tool_search_tool)
                         logger.info(f"Tool search active: {len(mcp_tools)} tools deferred")
+
+            # Load adapter tools and filter MCP tools that are wrapped+hidden by adapters.
+            # Run even when no MCP servers are enabled, in case adapters wrap something else.
+            adapter_tools, mcp_tools = load_adapter_tools(extensions_config, mcp_tools)
+            if adapter_tools:
+                logger.info(f"Loaded {len(adapter_tools)} adapter tool(s); {len(mcp_tools)} MCP tool(s) remain visible after hide_wrapped_tools")
         except ImportError:
             logger.warning("MCP module not available. Install 'langchain-mcp-adapters' package to enable MCP tools.")
         except Exception as e:
@@ -151,16 +159,17 @@ def get_available_tools(
     except Exception as e:
         logger.warning(f"Failed to load ACP tool: {e}")
 
-    logger.info(f"Total tools loaded: {len(loaded_tools)}, built-in tools: {len(builtin_tools)}, MCP tools: {len(mcp_tools)}, ACP tools: {len(acp_tools)}")
+    logger.info(f"Total tools loaded: {len(loaded_tools)}, built-in tools: {len(builtin_tools)}, MCP tools: {len(mcp_tools)}, adapter tools: {len(adapter_tools)}, ACP tools: {len(acp_tools)}")
 
     # Deduplicate by tool name — config-loaded tools take priority, followed by
-    # built-ins, MCP tools, and ACP tools.  Duplicate names cause the LLM to
+    # built-ins, MCP tools, adapter tools, and ACP tools.  Duplicate names cause the LLM to
     # receive ambiguous or concatenated function schemas (issue #1803).
-    all_tools = loaded_tools + builtin_tools + mcp_tools + acp_tools
+    all_tools = loaded_tools + builtin_tools + mcp_tools + adapter_tools + acp_tools
     seen_names: set[str] = set()
     unique_tools: list[BaseTool] = []
     for t in all_tools:
         if t.name not in seen_names:
+            print(t.name)
             unique_tools.append(t)
             seen_names.add(t.name)
         else:
@@ -168,4 +177,5 @@ def get_available_tools(
                 "Duplicate tool name %r detected and skipped — check your config.yaml and MCP server registrations (issue #1803).",
                 t.name,
             )
+
     return unique_tools

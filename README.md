@@ -699,6 +699,43 @@ client.upload_files("thread-1", ["./report.pdf"])  # {"success": True, "files": 
 
 All dict-returning methods are validated against Gateway Pydantic response models in CI (`TestGatewayConformance`), ensuring the embedded client stays in sync with the HTTP API schemas. See `backend/packages/harness/deerflow/client.py` for full API documentation.
 
+## Repairing Broken Thread Histories
+
+DeerFlow persists LangGraph chat history in `backend/.deer-flow/checkpoints.db` (SQLite). When a run is interrupted mid-tool-call, an LLM stream is truncated, or a frontend client drops a turn, the latest checkpoint of a thread can end up in a state LangGraph cannot resume:
+
+- an `AIMessage` with `tool_calls` whose `ToolMessage` responses are missing (the next turn fails with `tool_call_id not found`),
+- duplicated consecutive `HumanMessage` or `AIMessage` entries,
+- a trailing `HumanMessage` (the assistant never replied), or
+- orphan `ToolMessage` entries whose `tool_call_id` does not match any prior tool call.
+
+The [`clean_thread_history.py`](clean_thread_history.py) script at the repo root rewrites the latest checkpoint of a given thread so the message list is well-formed, and clears pending `writes` rows that reference the broken turn. It does not modify older historical checkpoints.
+
+**Why use it**: when the UI shows a hung thread, when starting a new turn raises `tool_call_id` validation errors, or after a crash that left a thread mid-run.
+
+**Usage** (run from the repo root with the backend virtualenv):
+
+```bash
+# Inspect what would change without writing
+python clean_thread_history.py <thread_id> --dry-run
+
+# Repair a single thread
+python clean_thread_history.py <thread_id>
+
+# Scan and repair every thread in the DB
+python clean_thread_history.py --all
+
+# Use a non-default DB location
+python clean_thread_history.py <thread_id> --db backend/.deer-flow/checkpoints.db
+```
+
+On Windows, invoke the venv interpreter directly:
+
+```powershell
+.\backend\.venv\Scripts\python.exe clean_thread_history.py <thread_id>
+```
+
+The script is idempotent — re-running it on a clean thread is a no-op. After a repair, restart the LangGraph / Gateway server so it reloads the checkpoint.
+
 ## Documentation
 
 - [Contributing Guide](CONTRIBUTING.md) - Development environment setup and workflow
