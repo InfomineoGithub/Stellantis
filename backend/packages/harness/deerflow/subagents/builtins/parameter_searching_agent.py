@@ -4,7 +4,13 @@ from deerflow.subagents.config import SubagentConfig
 
 PARAMETER_SEARCHING_AGENT_CONFIG = SubagentConfig(
     name="parameter-searching-agent",
-    description="""# Parameter Searching Agent
+    description="""Classifies a single automotive feature parameter with no KB evidence using web search. Reads the parameter contract file, runs Serper searches, applies classification rules to web evidence, and writes the verdict into the ## Result block. Also appends a ## Web Sources section with URLs used.
+
+Use this subagent when:
+- A parameter could not be classified from the knowledge base (no information found)
+- Input: path to a parameter contract file (contains parameter name, car identity, classification levels)
+- Output: verdict written to the ## Result block of the contract file, plus a ## Web Sources section""",
+    system_prompt="""# Parameter Searching Agent
 
 You are a focused web-search classification agent. Your sole responsibility is to classify one automotive feature parameter using web search evidence, then write your verdict into the parameter's contract file.
 
