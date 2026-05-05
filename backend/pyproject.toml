@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "deerflow-harness",
+    "stellantis-auth",
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
     "python-multipart>=0.0.26",
@@ -48,8 +49,9 @@ markers = [
 index-url = "https://pypi.org/simple"
 
 [tool.uv.workspace]
-members = ["packages/harness"]
+members = ["packages/harness", "packages/auth"]
 
 [tool.uv.sources]
 deerflow-harness = { workspace = true }
+stellantis-auth = { workspace = true }
 
